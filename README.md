@@ -97,7 +97,7 @@ Files next to the game exe: `tw1_Extendet-settings.ini`, `TWExtended.log`,
 - Plugin: `build_extended.bat` (Tiny C Compiler, 32-bit; `..\tcc\tcc.exe`).
   Offline tests: `tcc -o t.exe test_extended.c && t.exe`.
 - Tool exe: `build_settings_exe.bat` (PyInstaller, Python 3.13). Embeds the
-  plugin DLL from `bin\TWSEPlugins\` and `bin	wse.dll` (TWSE by buglord,
+  plugin DLL from `bin\TWSEPlugins\` and `bin\twse.dll` (TWSE by buglord,
   CC0). Run the plugin build first.
 - Script mode: `python tw1_extended_settings.py` (needs `theme.py` next to it).
 
