@@ -1,0 +1,7 @@
+__pycache__/
+dist/
+build/
+*.spec
+tw1_extended_settings.json
+*.exe
+*.def
