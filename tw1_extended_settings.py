@@ -16,11 +16,11 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
 import theme
+import twse_patch
 from theme import (BG, PANEL, FIELD, CANVAS_BG, LINE, SEL, INK, MUT, DIM,
                    GOLD, GOLD_HI, OK, ERR, FONT, FONT_BOLD, FONT_SMALL,
                    FONT_MONO, FONT_H2)
 
-VERSION = '1.0'
 TOOL_NAME = 'tw1_Extendet-settings'
 GITHUB_URL = 'https://github.com/MedievalDev/TW1_Extendet-settings'
 SITE_URL = 'https://alchemy-fox.de/'
@@ -42,6 +42,7 @@ DATEN = (os.path.join(os.environ.get('LOCALAPPDATA', HERE), 'TW1ExtendedSettings
          if FROZEN else HERE)
 KONFIG_DATEI = os.path.join(DATEN, 'tw1_extended_settings.json')
 ICON = os.path.join(RES, 'tw1_extended.ico')
+VERSION = '1.1'
 
 # Originalwerte des Spiels (TwoWorlds.exe 1.7), siehe tw_extended.c
 STANDARD = {
@@ -328,7 +329,8 @@ class App(tk.Tk):
         m.add_separator()
         m.add_command(label=tr('Spielordner wählen ...'), command=self.spielordner_waehlen)
         m.add_command(label=tr('Spielordner öffnen'), command=self.spielordner_oeffnen)
-        m.add_command(label=tr('Plugin installieren'), command=self.plugin_installieren)
+        m.add_command(label=tr('Installieren (TWSE + Plugin)'), command=self.plugin_installieren)
+        m.add_command(label=tr('Spiel starten'), command=self.spiel_starten)
         m.add_separator()
         m.add_command(label=tr('Beenden'), command=self.beenden)
 
@@ -454,8 +456,10 @@ class App(tk.Tk):
         self.btn_anwenden.pack(fill='x', pady=(0, 4))
         self.btn_original = ttk.Button(knoepfe, text=tr('Originalwerte'), command=self.originalwerte)
         self.btn_original.pack(fill='x', pady=(0, 4))
-        self.btn_plugin = ttk.Button(knoepfe, text=tr('Plugin installieren'), command=self.plugin_installieren)
+        self.btn_plugin = ttk.Button(knoepfe, text=tr('Installieren (TWSE + Plugin)'), command=self.plugin_installieren)
         self.btn_plugin.pack(fill='x', pady=(0, 4))
+        self.btn_start = ttk.Button(knoepfe, text=tr('Spiel starten'), command=self.spiel_starten)
+        self.btn_start.pack(fill='x', pady=(0, 4))
         ttk.Button(knoepfe, text=tr('Log leeren'), command=self.log_leeren).pack(fill='x')
 
         ttk.Label(rechts, text=tr('Plugin-Log'), style='PanelTitle.TLabel').pack(fill='x', pady=(8, 0))
@@ -632,6 +636,27 @@ class App(tk.Tk):
                 return kandidat
         return ''
 
+    def twse_quelle(self):
+        for kandidat in (os.path.join(RES, TWSE_DLL),
+                         os.path.join(HERE, 'bin', TWSE_DLL),
+                         os.path.join(HERE, '..', 'twse', 'bin', TWSE_DLL)):
+            if os.path.exists(kandidat):
+                return kandidat
+        return ''
+
+    def twse_da(self):
+        return all(os.path.exists(os.path.join(self.spiel, n)) for n in (TWSE_EXE, TWSE_DLL))
+
+    def spiel_starten(self):
+        if not self.spiel or not self.twse_da():
+            self.melden(tr('TWSE fehlt noch. Erst "Installieren" klicken.'), 'err')
+            return
+        try:
+            os.startfile(os.path.join(self.spiel, TWSE_EXE), cwd=self.spiel)
+            self.melden(tr('Spiel gestartet (TwoWorldsExtended.exe).'), 'ok')
+        except OSError as e:
+            self.melden(tr('Start fehlgeschlagen: {fehler}').format(fehler=e), 'err')
+
     def plugin_installieren(self):
         if not self.spiel:
             self.melden(tr('Spielordner nicht gefunden. Datei > Spielordner wählen.'), 'err')
@@ -643,18 +668,26 @@ class App(tk.Tk):
         if prozess_laeuft((TWSE_EXE, 'TwoWorlds.exe')):
             messagebox.showwarning(TOOL_NAME, tr('Bitte das Spiel beenden, dann das Plugin installieren.'))
             return
+        getan = []
+        twse_dll = self.twse_quelle()
+        if twse_dll:
+            try:
+                getan += twse_patch.installieren(self.spiel, twse_dll)
+            except (OSError, ValueError) as e:
+                messagebox.showerror(TOOL_NAME, tr('TWSE anlegen fehlgeschlagen: {fehler}').format(fehler=e))
+                return
         ziel_ordner = os.path.join(self.spiel, 'TWSEPlugins')
         try:
             os.makedirs(ziel_ordner, exist_ok=True)
             shutil.copy2(quelle, os.path.join(ziel_ordner, PLUGIN_DLL))
+            getan.append('TWSEPlugins\\' + PLUGIN_DLL)
         except OSError as e:
             messagebox.showerror(TOOL_NAME, tr('Kopieren fehlgeschlagen: {fehler}').format(fehler=e))
             return
-        fehlt = [n for n in (TWSE_EXE, TWSE_DLL) if not os.path.exists(os.path.join(self.spiel, n))]
-        if fehlt:
-            messagebox.showinfo(TOOL_NAME, tr('Plugin kopiert. Es fehlt aber noch TWSE ({dateien}): einmal den TWSE-Patcher von buglord auf TwoWorlds.exe anwenden, danach immer über TwoWorldsExtended.exe starten.').format(dateien=', '.join(fehlt)))
+        if not self.twse_da():
+            messagebox.showinfo(TOOL_NAME, tr('Plugin kopiert, aber TWSE fehlt (twse.dll liegt nicht neben dem Tool). TWSE-Patcher von buglord auf TwoWorlds.exe anwenden, danach über TwoWorldsExtended.exe starten.'))
         else:
-            self.melden(tr('Plugin installiert. Spiel über TwoWorldsExtended.exe starten.'), 'ok')
+            self.melden(tr('Installiert: {dateien}. Spiel mit "Spiel starten" oder über TwoWorldsExtended.exe starten.').format(dateien=', '.join(getan)), 'ok')
         self.aktualisiere_status()
 
     # ---------------------------------------------------------- Status / Log
@@ -672,7 +705,7 @@ class App(tk.Tk):
         plugin = os.path.exists(os.path.join(self.spiel, 'TWSEPlugins', PLUGIN_DLL))
         z['plugin'].configure(text=tr('Plugin TWExtended.dll: {zustand}').format(
             zustand=tr('installiert') if plugin else tr('nicht installiert')), foreground=OK if plugin else ERR)
-        self.btn_plugin.configure(text=tr('Plugin aktualisieren') if plugin else tr('Plugin installieren'))
+        self.btn_plugin.configure(text=tr('Aktualisieren (TWSE + Plugin)') if (plugin and twse) else tr('Installieren (TWSE + Plugin)'))
         status = self.status_lesen()
         if status:
             z['aktiv'].configure(text=tr('Plugin zuletzt aktiv: {zeit}').format(zeit=status.get('time', '?')), foreground=INK)
@@ -819,14 +852,14 @@ class Guide(tk.Toplevel):
         self.protocol('WM_DELETE_WINDOW', self.schliessen)
         self.schritte = [
             (tr('Willkommen'), tr('Dieses Tool stellt ein, wie viel Schaden Two Worlds 1 beim Fallen und Rutschen macht. Die Werte wirken sofort, auch während das Spiel läuft.'), None),
-            (tr('Status rechts'), tr('Hier siehst du den Spielordner, ob TWSE und das Plugin da sind und wann das Plugin zuletzt gelaufen ist. Fehlt das Plugin, klicke "Plugin installieren".'), 'status_block'),
+            (tr('Status rechts'), tr('Hier siehst du den Spielordner, ob TWSE und das Plugin da sind und wann das Plugin zuletzt gelaufen ist. Fehlt etwas, klicke "Installieren": das legt TwoWorldsExtended.exe und twse.dll an und kopiert das Plugin. TwoWorlds.exe bleibt unverändert.'), 'status_block'),
             (tr('Fallschaden'), tr('Schalter aus = gar kein Fallschaden. Der Regler skaliert den Originalschaden: 50 ist die Hälfte, 0 ist nichts. Darunter die Höhen, ab denen Schaden und Sturztod beginnen.'), 'box_fall'),
             (tr('Rutschschaden'), tr('Beim Hinunterrutschen steiler Hänge zieht das Spiel alle paar Ticks Prozent der Lebenspunkte ab. Prozent und Anlaufzeit lassen sich hier setzen.'), 'box_slide'),
             (tr('Pferd'), tr('"Pferd unsterblich" schützt das zuletzt gerittene Pferd. Die Pfeifreichweite gilt nur, wenn ihr Schalter an ist; sonst bleibt der Wert aus der Exe.'), 'box_horse'),
             (tr('Lava'), tr('Lava zieht jedes Bild 5 % der Lebenspunkte ab. Der erste Regler ändert die Prozent, der zweite, wie oft ein Tick kommt. Beides zusammen bestimmt, wie lange man in Lava überlebt.'), 'box_lava'),
             (tr('Diagnose'), tr('Das Protokoll schreibt jeden Lebenspunkt-Verlust des Helden mit Aufrufer in TWExtended.log. Nur zum Suchen nach weiteren Schadensquellen nötig, sonst aus lassen.'), 'box_diag'),
             (tr('Anwenden'), tr('Jede Änderung wird nach einer Sekunde automatisch gespeichert. Der Knopf "Anwenden" (Strg+S) macht es sofort. "Originalwerte" stellt das Spiel zurück.'), 'btn_anwenden'),
-            (tr('Fertig'), tr('Das Spiel muss über TwoWorldsExtended.exe (TWSE) starten, sonst lädt kein Plugin. Diesen Guide gibt es jederzeit unter Hilfe > Guide starten oder mit F1.'), None),
+            (tr('Fertig'), tr('Das Spiel muss über TwoWorldsExtended.exe (TWSE) starten, sonst lädt kein Plugin; der Knopf "Spiel starten" tut genau das. Diesen Guide gibt es jederzeit unter Hilfe > Guide starten oder mit F1.'), None),
         ]
         wrap = ttk.Frame(self, style='Panel.TFrame', padding=(14, 10))
         wrap.pack(fill='both', expand=True)
@@ -909,8 +942,8 @@ class Guide(tk.Toplevel):
 
 KURZANLEITUNG = """tw1_Extendet-settings - Kurzanleitung
 
-1. Voraussetzung: Two Worlds 1 (1.7) mit TWSE von buglord. Einmal den TWSE-Patcher auf TwoWorlds.exe anwenden, es entsteht TwoWorldsExtended.exe. Das Spiel immer darüber starten.
-2. Plugin: Der Knopf "Plugin installieren" kopiert TWExtended.dll nach <Spiel>\\TWSEPlugins\\.
+1. Voraussetzung: Two Worlds 1 (1.7). Der Knopf "Installieren" legt TwoWorldsExtended.exe (Kopie von TwoWorlds.exe mit dem TWSE-Lader von buglord, plus 4-GB-Flag und Win11-Texteingabe-Fix) und twse.dll an. TwoWorlds.exe selbst wird nicht angefasst.
+2. Plugin: Derselbe Knopf kopiert TWExtended.dll nach <Spiel>\\TWSEPlugins\\. Das Spiel immer über TwoWorldsExtended.exe starten, zum Beispiel mit "Spiel starten".
 3. Werte: Jede Änderung landet nach einer Sekunde in <Spiel>\\tw1_Extendet-settings.ini. Das Plugin prüft die Datei jede Sekunde und übernimmt sie sofort, auch mitten im Spiel.
 4. Fallschaden: Das Spiel rechnet Schaden in Prozent der maximalen Lebenspunkte: (Höhe - 8) * 5,9 %. Ab Höhe 25 ist der Held sofort tot, ebenso wenn der Schaden zum Töten reicht. Alle vier Größen sind hier einstellbar, der Schalter nimmt alles weg.
 5. Rutschschaden: Wer länger als 30 Ticks einen steilen Hang hinunterrutscht, verliert alle fünf Spielschritte 10 % der Lebenspunkte. Beides einstellbar.
@@ -921,13 +954,20 @@ KURZANLEITUNG = """tw1_Extendet-settings - Kurzanleitung
 Originalwerte: Fall an, 100 %, ab 8.0, tot ab 25.0, tödlich an; Rutschen an, 10 %, ab 30 Ticks; Lava an, 5 %, jedes Bild; Pferd sterblich, Pfeife 40 m.
 """
 
-UEBER_TEXT = """Stellt Fall-, Rutsch- und Lavaschaden, Pferde-Unsterblichkeit und die Pfeifreichweite von Two Worlds 1 ein. Die Werte schreibt das Tool in eine Datei im Spielordner, das TWSE-Plugin TWExtended.dll wendet sie im laufenden Spiel an. Baut auf dem Two Worlds Script Extender von buglord auf. Lizenz CC0."""
+UEBER_TEXT = """Stellt Fall-, Rutsch- und Lavaschaden, Pferde-Unsterblichkeit und die Pfeifreichweite von Two Worlds 1 ein. Die Werte schreibt das Tool in eine Datei im Spielordner, das TWSE-Plugin TWExtended.dll wendet sie im laufenden Spiel an. Baut auf dem Two Worlds Script Extender (TWSE) von buglord auf und legt ihn selbst an; twse.dll und der Patch sind CC0. Lizenz CC0."""
 
 TEXTE_EN = {
     'Datei': 'File', 'Ansicht': 'View', 'Hilfe': 'Help',
     'Anwenden': 'Apply', 'Originalwerte': 'Original values',
     'Spielordner wählen ...': 'Choose game folder ...', 'Spielordner öffnen': 'Open game folder',
-    'Plugin installieren': 'Install plugin', 'Plugin aktualisieren': 'Update plugin', 'Beenden': 'Quit',
+    'Installieren (TWSE + Plugin)': 'Install (TWSE + plugin)', 'Aktualisieren (TWSE + Plugin)': 'Update (TWSE + plugin)',
+    'Spiel starten': 'Start game', 'Beenden': 'Quit',
+    'TWSE fehlt noch. Erst "Installieren" klicken.': 'TWSE is still missing. Click "Install" first.',
+    'Spiel gestartet (TwoWorldsExtended.exe).': 'Game started (TwoWorldsExtended.exe).',
+    'Start fehlgeschlagen: {fehler}': 'Start failed: {fehler}',
+    'TWSE anlegen fehlgeschlagen: {fehler}': 'Creating TWSE failed: {fehler}',
+    'Plugin kopiert, aber TWSE fehlt (twse.dll liegt nicht neben dem Tool). TWSE-Patcher von buglord auf TwoWorlds.exe anwenden, danach über TwoWorldsExtended.exe starten.': 'Plugin copied, but TWSE is missing (twse.dll is not next to the tool). Run buglord\'s TWSE patcher on TwoWorlds.exe, then start via TwoWorldsExtended.exe.',
+    'Installiert: {dateien}. Spiel mit "Spiel starten" oder über TwoWorldsExtended.exe starten.': 'Installed: {dateien}. Start the game with "Start game" or via TwoWorldsExtended.exe.',
     'Sprache': 'Language', 'Guide starten': 'Start guide', 'Kurzanleitung': 'Quick guide', 'Über': 'About',
     'GitHub-Repo': 'GitHub repo', 'Guide-Seite': 'Guide page', 'Community': 'Community',
     'Fallschaden': 'Fall damage', 'Fallschaden an': 'Fall damage on',
@@ -975,8 +1015,6 @@ TEXTE_EN = {
     'TWExtended.dll liegt nicht neben dem Tool.': 'TWExtended.dll is not next to the tool.',
     'Bitte das Spiel beenden, dann das Plugin installieren.': 'Please quit the game, then install the plugin.',
     'Kopieren fehlgeschlagen: {fehler}': 'Copy failed: {fehler}',
-    'Plugin kopiert. Es fehlt aber noch TWSE ({dateien}): einmal den TWSE-Patcher von buglord auf TwoWorlds.exe anwenden, danach immer über TwoWorldsExtended.exe starten.': 'Plugin copied. TWSE is still missing ({dateien}): run the TWSE patcher by buglord once on TwoWorlds.exe, then always start via TwoWorldsExtended.exe.',
-    'Plugin installiert. Spiel über TwoWorldsExtended.exe starten.': 'Plugin installed. Start the game via TwoWorldsExtended.exe.',
     'Spielordner: nicht gefunden': 'Game folder: not found', 'Spielordner: {pfad}': 'Game folder: {pfad}',
     'TWSE (TwoWorldsExtended.exe): {zustand}': 'TWSE (TwoWorldsExtended.exe): {zustand}',
     'vorhanden': 'present', 'fehlt': 'missing',
@@ -992,19 +1030,19 @@ TEXTE_EN = {
     'Guide': 'Guide', 'Willkommen': 'Welcome',
     'Dieses Tool stellt ein, wie viel Schaden Two Worlds 1 beim Fallen und Rutschen macht. Die Werte wirken sofort, auch während das Spiel läuft.': 'This tool sets how much damage Two Worlds 1 deals for falling and sliding. Values take effect immediately, even while the game is running.',
     'Status rechts': 'Status on the right',
-    'Hier siehst du den Spielordner, ob TWSE und das Plugin da sind und wann das Plugin zuletzt gelaufen ist. Fehlt das Plugin, klicke "Plugin installieren".': 'Here you see the game folder, whether TWSE and the plugin are present and when the plugin last ran. If the plugin is missing, click "Install plugin".',
+    'Hier siehst du den Spielordner, ob TWSE und das Plugin da sind und wann das Plugin zuletzt gelaufen ist. Fehlt etwas, klicke "Installieren": das legt TwoWorldsExtended.exe und twse.dll an und kopiert das Plugin. TwoWorlds.exe bleibt unverändert.': 'Here you see the game folder, whether TWSE and the plugin are present and when the plugin last ran. If something is missing, click "Install": it creates TwoWorldsExtended.exe and twse.dll and copies the plugin. TwoWorlds.exe stays untouched.',
     'Schalter aus = gar kein Fallschaden. Der Regler skaliert den Originalschaden: 50 ist die Hälfte, 0 ist nichts. Darunter die Höhen, ab denen Schaden und Sturztod beginnen.': 'Switch off = no fall damage at all. The slider scales the original damage: 50 is half, 0 is nothing. Below are the heights where damage and fall death begin.',
     'Beim Hinunterrutschen steiler Hänge zieht das Spiel alle paar Ticks Prozent der Lebenspunkte ab. Prozent und Anlaufzeit lassen sich hier setzen.': 'While sliding down steep slopes the game takes a percentage of hit points every few ticks. Percent and grace time are set here.',
     'Lava': 'Lava',
     'Jede Änderung wird nach einer Sekunde automatisch gespeichert. Der Knopf "Anwenden" (Strg+S) macht es sofort. "Originalwerte" stellt das Spiel zurück.': 'Every change is saved automatically after a second. The "Apply" button (Ctrl+S) does it right away. "Original values" restores the game.',
     'Fertig': 'Done',
-    'Das Spiel muss über TwoWorldsExtended.exe (TWSE) starten, sonst lädt kein Plugin. Diesen Guide gibt es jederzeit unter Hilfe > Guide starten oder mit F1.': 'The game must start via TwoWorldsExtended.exe (TWSE), otherwise no plugin loads. This guide is always available under Help > Start guide or with F1.',
+    'Das Spiel muss über TwoWorldsExtended.exe (TWSE) starten, sonst lädt kein Plugin; der Knopf "Spiel starten" tut genau das. Diesen Guide gibt es jederzeit unter Hilfe > Guide starten oder mit F1.': 'The game must start via TwoWorldsExtended.exe (TWSE), otherwise no plugin loads; the "Start game" button does exactly that. This guide is always available under Help > Start guide or with F1.',
     'Beim Start nicht mehr anzeigen': "Don't show at startup", 'Zurück': 'Back', 'Weiter': 'Next',
     'Schritt {n} von {m}': 'Step {n} of {m}',
     KURZANLEITUNG: """tw1_Extendet-settings - Quick guide
 
-1. Requirement: Two Worlds 1 (1.7) with TWSE by buglord. Run the TWSE patcher once on TwoWorlds.exe; it creates TwoWorldsExtended.exe. Always start the game through it.
-2. Plugin: The "Install plugin" button copies TWExtended.dll to <Game>\\TWSEPlugins\\.
+1. Requirement: Two Worlds 1 (1.7). The "Install" button creates TwoWorldsExtended.exe (a copy of TwoWorlds.exe with buglord's TWSE loader, plus the 4 GB flag and the Win11 text input fix) and twse.dll. TwoWorlds.exe itself is not touched.
+2. Plugin: The same button copies TWExtended.dll to <Game>\\TWSEPlugins\\. Always start the game through TwoWorldsExtended.exe, for example with "Start game".
 3. Values: Every change lands in <Game>\\tw1_Extendet-settings.ini after a second. The plugin checks the file every second and applies it right away, even mid-game.
 4. Fall damage: The game computes damage in percent of max HP: (height - 8) * 5.9 %. From height 25 the hero dies instantly, likewise when the damage would kill. All four numbers are adjustable here; the switch removes everything.
 5. Slide damage: Sliding down a steep slope for more than 30 ticks costs 10 % of hit points every five game steps. Both adjustable.
@@ -1014,7 +1052,7 @@ TEXTE_EN = {
 
 Original values: fall on, 100 %, from 8.0, death from 25.0, lethal on; slide on, 10 %, from 30 ticks; lava on, 5 %, every frame; horse mortal, whistle 40 m.
 """,
-    UEBER_TEXT: """Adjusts fall, slide and lava damage, horse immortality and the whistle range of Two Worlds 1. The tool writes the values to a file in the game folder; the TWSE plugin TWExtended.dll applies them in the running game. Built on the Two Worlds Script Extender by buglord. License CC0.""",
+    UEBER_TEXT: """Adjusts fall, slide and lava damage, horse immortality and the whistle range of Two Worlds 1. The tool writes the values to a file in the game folder; the TWSE plugin TWExtended.dll applies them in the running game. Built on the Two Worlds Script Extender (TWSE) by buglord and installs it itself; twse.dll and the patch are CC0. License CC0.""",
 }
 
 

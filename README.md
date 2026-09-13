@@ -13,20 +13,27 @@ an immortal horse and the whistle range, live while the game runs. Two parts:
 ## Download
 
 Ready-made files are on the release page:
-[TW1_Extendet-settings v1.0](https://github.com/MedievalDev/TW1_Extendet-settings/releases/tag/v1.0)
-(`tw1_Extendet-settings.exe` with the plugin embedded, and `TWExtended.dll`
-alone). Windows SmartScreen may warn about the unsigned exe; "More info >
+[TW1_Extendet-settings v1.1](https://github.com/MedievalDev/TW1_Extendet-settings/releases/tag/v1.1)
+(`tw1_Extendet-settings.exe` with the plugin and TWSE embedded, and
+`TWExtended.dll` alone). Windows SmartScreen may warn about the unsigned exe; "More info >
 Run anyway".
 
 ## Install
 
-1. Apply the TWSE patcher once to `TwoWorlds.exe` (creates
-   `TwoWorldsExtended.exe` and `twse.dll`). Always start the game through
-   `TwoWorldsExtended.exe`; the plain exe loads no plugins.
-2. Start `tw1_Extendet-settings.exe`, click **Install plugin**. That copies
-   `TWExtended.dll` to `<Game>\TWSEPlugins\`.
+1. Start `tw1_Extendet-settings.exe` and click **Install (TWSE + plugin)**.
+   That creates `TwoWorldsExtended.exe` (a copy of `TwoWorlds.exe` with
+   buglord's TWSE loader, the 4 GB flag and the Win11 text-input fix, exactly
+   what his patcher does) plus `twse.dll`, and copies `TWExtended.dll` to
+   `<Game>\TWSEPlugins\`. `TwoWorlds.exe` itself is not modified. If TWSE is
+   already installed, only the plugin is copied or updated.
+2. Start the game with **Start game** (or `TwoWorldsExtended.exe` directly);
+   the plain exe loads no plugins.
 3. Move the sliders. Every change is written after a second; the running game
    picks it up within another second. **Original values** restores the game.
+
+`twse_patch.py` is the Python port of `twse_patcher.c` from the TWSE
+repository (CC0), same byte changes and the same DJB2 checks, so it refuses
+unknown exe versions.
 
 The game folder comes from the registry
 (`HKLM\SOFTWARE\WOW6432Node\Reality Pump\TwoWorlds\FileSystem\DataPath`);
@@ -90,7 +97,8 @@ Files next to the game exe: `tw1_Extendet-settings.ini`, `TWExtended.log`,
 - Plugin: `build_extended.bat` (Tiny C Compiler, 32-bit; `..\tcc\tcc.exe`).
   Offline tests: `tcc -o t.exe test_extended.c && t.exe`.
 - Tool exe: `build_settings_exe.bat` (PyInstaller, Python 3.13). Embeds the
-  DLL from `bin\TWSEPlugins\`. Run the plugin build first.
+  plugin DLL from `bin\TWSEPlugins\` and `bin	wse.dll` (TWSE by buglord,
+  CC0). Run the plugin build first.
 - Script mode: `python tw1_extended_settings.py` (needs `theme.py` next to it).
 
 Language: English by default, German when the Windows display language is
