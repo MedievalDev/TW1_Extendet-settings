@@ -1,7 +1,7 @@
 # tw1_Extendet-settings
 
-Adjustable damage for **Two Worlds 1 (v1.7)**: fall damage and slide damage,
-live while the game runs. Two parts:
+Adjustable damage for **Two Worlds 1 (v1.7)**: fall, slide and lava damage,
+an immortal horse and the whistle range, live while the game runs. Two parts:
 
 - `TWExtended.dll` - a plugin for buglord's
   [Two Worlds Script Extender (TWSE)](https://github.com/buglord/Two-Worlds-1-Script-Extender).
@@ -44,13 +44,12 @@ File > Choose game folder overrides it.
 | Slide damage on | on | damage while sliding down steep slopes |
 | Slide percent per tick | 10 | percent of max HP every five game steps |
 | Slide grace ticks | 30 | sliding ticks before damage starts |
-| Horse immortal | off | the last ridden horse takes no damage, its HP stay full |
-| Whistle range | 40 m | distance the horse answers the whistle from; switch off = leave the exe value (a patched exe keeps its value) |
-| Log damage | off | log every HP loss of the hero with the caller address |
-
 | Lava damage on | on | damage while swimming in lava |
 | Lava percent per tick | 5 | percent of max HP per damage tick |
 | Lava tick every n frames | 1 | original: every frame, so 5 % x 20 frames = dead in under a second |
+| Horse immortal | off | the last ridden horse takes no damage, its HP stay full |
+| Whistle range | 40 m | distance the horse answers the whistle from; switch off = leave the exe value (a patched exe keeps its value) |
+| Log damage | off | log every HP loss of the hero with the caller address |
 
 ## How it works (TwoWorlds.exe 1.7)
 
