@@ -47,7 +47,7 @@
 #include <stdarg.h>
 #include <string.h>
 #include <stdlib.h>
-#include "..\twse\twse_plugin.h"
+#include "twse_plugin.h"   /* Include-Verzeichnis twse\ oder ..\twse\ aus dem Build-Skript */
 
 #define PLUG_NAME     "TWExtended"
 #define INI_NAME      "tw1_Extendet-settings.ini"

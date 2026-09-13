@@ -10,7 +10,7 @@ if not defined TCC (
 )
 "%TCC%" -v 2>&1 | findstr /i "i386" >nul || (echo FEHLER: %TCC% ist kein 32-bit tcc & exit /b 1)
 if not exist "%~dp0bin\TWSEPlugins" mkdir "%~dp0bin\TWSEPlugins"
-"%TCC%" -shared -o "%~dp0bin\TWSEPlugins\TWExtended.dll" "%~dp0tw_extended.c" || (echo Failed... & exit /b 1)
+"%TCC%" -I"%~dp0twse" -I"%~dp0..\twse" -shared -o "%~dp0bin\TWSEPlugins\TWExtended.dll" "%~dp0tw_extended.c" || (echo Failed... & exit /b 1)
 del "%~dp0bin\TWSEPlugins\TWExtended.def" 2>nul
 echo Compile success: bin\TWSEPlugins\TWExtended.dll
 exit /b 0

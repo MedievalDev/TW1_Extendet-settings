@@ -58,6 +58,15 @@ File > Choose game folder overrides it.
 | Whistle range | 40 m | distance the horse answers the whistle from; switch off = leave the exe value (a patched exe keeps its value) |
 | Log damage | off | log every HP loss of the hero with the caller address |
 
+## Trainer
+
+The folder `trainer\` holds the TW Trainer, a second TWSE plugin: godmode,
+infinite gold and mana, run speed, Shift sprint, lockpicking, kill target,
+teleporters unlocked, and console access to every vanilla command. Drop
+`trainer\bin\TWSEPlugins\TWTrainer.dll` next to `TWExtended.dll` in
+`<Game>\TWSEPlugins\`; hotkeys and commands are in
+[trainer/README.md](trainer/README.md). Singleplayer only.
+
 ## How it works (TwoWorlds.exe 1.7)
 
 Fall damage lives in the PhysX character controller of the hero. Its vtable
@@ -104,4 +113,19 @@ Files next to the game exe: `tw1_Extendet-settings.ini`, `TWExtended.log`,
 Language: English by default, German when the Windows display language is
 German; switch with `DE · EN` at the top right.
 
-License: CC0. Built on TWSE by buglord.
+License: CC0. Built on TWSE by buglord; the TWSE headers, `twse.dll` and the
+patch logic in `twse/` and `twse_patch.py` are his work (CC0).
+
+## Screenshots
+
+Main window, English:
+
+![Main window](docs/tool_en.png)
+
+Lower part: lava, horse, diagnostics:
+
+![Lower part](docs/tool_en_lower.png)
+
+German, with the first-start guide:
+
+![Guide](docs/tool_de_guide.png)
