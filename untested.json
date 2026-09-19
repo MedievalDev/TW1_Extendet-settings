@@ -1,0 +1,171 @@
+{
+  "format": 1,
+  "tests": [
+    {
+      "id": "install-one-click",
+      "since": "1.1.0",
+      "needs_run": false,
+      "title": {
+        "de": "Ein Klick installiert TWSE und das Plugin",
+        "en": "One click installs TWSE and the plugin"
+      },
+      "why": {
+        "de": "Der Installer legt TwoWorldsExtended.exe und twse.dll selbst an. Gemessen nur auf einem Rechner, bei dem TWSE schon da war, und in einem Testordner.",
+        "en": "The installer creates TwoWorldsExtended.exe and twse.dll itself. Measured only on one PC that already had TWSE, and in a test folder."
+      },
+      "steps": {
+        "de": [
+          "Rechts im Status nachsehen, ob \"TWSE\" als fehlt oder vorhanden angezeigt wird (merken).",
+          "Rechts auf \"Installieren (TWSE + Plugin)\" klicken.",
+          "Unten in der Statuszeile die Meldung lesen.",
+          "Im Spielordner nachsehen (Datei > Spielordner öffnen): liegen dort TwoWorldsExtended.exe, twse.dll und der Ordner TWSEPlugins mit TWExtended.dll?"
+        ],
+        "en": [
+          "On the right, check whether \"TWSE\" shows as missing or present (remember it).",
+          "Click \"Install (TWSE + plugin)\" on the right.",
+          "Read the message in the status bar at the bottom.",
+          "Look into the game folder (File > Open game folder): are TwoWorldsExtended.exe, twse.dll and the folder TWSEPlugins with TWExtended.dll there?"
+        ]
+      },
+      "expect": {
+        "de": "Statuszeile grün mit \"Installiert: ...\", rechts TWSE und Plugin grün, alle drei Dateien im Spielordner. TwoWorlds.exe hat dasselbe Datum wie vorher.",
+        "en": "Green status bar with \"Installed: ...\", TWSE and plugin green on the right, all three files in the game folder. TwoWorlds.exe keeps its old date."
+      }
+    },
+    {
+      "id": "fall-damage-off-ingame",
+      "since": "1.0.0",
+      "needs_run": true,
+      "title": {
+        "de": "Fallschaden aus: Sprung ohne Schaden",
+        "en": "Fall damage off: jump without damage"
+      },
+      "why": {
+        "de": "Der Eingriff in die Landung ist aus der Exe abgeleitet und lädt bei uns ohne Fehler. Ob ein echter Sturz wirklich keinen Schaden mehr macht, hat noch niemand im Spiel geprüft.",
+        "en": "The landing hook is derived from the exe and loads without errors here. Nobody has checked in the game yet that a real fall really does no damage."
+      },
+      "steps": {
+        "de": [
+          "Falls noch nicht geschehen: \"Installieren (TWSE + Plugin)\" klicken.",
+          "Bei Fallschaden den Haken \"Fallschaden an\" entfernen.",
+          "Unten auf \"Starten\" klicken und einen Spielstand laden.",
+          "Von einem hohen Felsen oder Turm springen, der sonst tödlich wäre.",
+          "Spiel beenden und hier das Ergebnis wählen."
+        ],
+        "en": [
+          "If not done yet: click \"Install (TWSE + plugin)\".",
+          "Under fall damage, untick \"Fall damage on\".",
+          "Click \"Start\" below and load a savegame.",
+          "Jump from a high rock or tower that would normally kill you.",
+          "Quit the game and pick the result here."
+        ]
+      },
+      "expect": {
+        "de": "Der Held landet und hat volle Lebenspunkte, kein Sturztod, kein Taumeln nach der Landung.",
+        "en": "The hero lands with full hit points, no fall death, no stagger after landing."
+      }
+    },
+    {
+      "id": "lava-damage-ingame",
+      "since": "1.1.0",
+      "needs_run": true,
+      "experimental": "lava",
+      "title": {
+        "de": "Lavaschaden einstellbar",
+        "en": "Lava damage adjustable"
+      },
+      "why": {
+        "de": "Die Lava-Stelle ist über ein Schadensprotokoll gefunden und nur offline geprüft. Ob die Regler im Spiel wirken, ist offen.",
+        "en": "The lava spot was found through a damage log and only checked offline. Whether the sliders work in the game is open."
+      },
+      "steps": {
+        "de": [
+          "Unter Lavaschaden \"Prozent der Lebenspunkte je Schadenstick\" auf 1 und \"Ein Schadenstick alle n Bilder\" auf 10 stellen.",
+          "Unten auf \"Starten\" klicken und einen Spielstand in der Nähe von Lava laden (zum Beispiel beim Vulkan im Süden).",
+          "Kurz in die Lava laufen und den Lebensbalken beobachten.",
+          "Spiel beenden, im Tool den Haken \"Lavaschaden an\" entfernen, erneut starten und wieder in die Lava.",
+          "Spiel beenden und hier das Ergebnis wählen."
+        ],
+        "en": [
+          "Under lava damage set \"Percent of hit points per damage tick\" to 1 and \"One damage tick every n frames\" to 10.",
+          "Click \"Start\" below and load a savegame near lava (for example at the volcano in the south).",
+          "Walk into the lava briefly and watch the health bar.",
+          "Quit, untick \"Lava damage on\" in the tool, start again and walk into the lava again.",
+          "Quit the game and pick the result here."
+        ]
+      },
+      "expect": {
+        "de": "Mit 1 % alle 10 Bilder sinkt der Lebensbalken langsam statt in unter einer Sekunde. Mit dem Haken aus sinkt er gar nicht.",
+        "en": "With 1 % every 10 frames the health bar drops slowly instead of in under a second. With the switch off it does not drop at all."
+      }
+    },
+    {
+      "id": "horse-immortal-ingame",
+      "since": "1.1.0",
+      "needs_run": true,
+      "experimental": "horse",
+      "title": {
+        "de": "Pferd unsterblich",
+        "en": "Immortal horse"
+      },
+      "why": {
+        "de": "Der Schutz hängt am zuletzt gerittenen Pferd und ist nur offline geprüft.",
+        "en": "The protection hangs on the last ridden horse and is only checked offline."
+      },
+      "steps": {
+        "de": [
+          "Unter Pferd den Haken \"Pferd unsterblich\" setzen.",
+          "Unten auf \"Starten\" klicken und einen Spielstand mit eigenem Pferd laden.",
+          "Einmal aufsteigen und wieder absteigen.",
+          "Das Pferd von Gegnern angreifen lassen oder selbst mit einer Waffe treffen.",
+          "Spiel beenden und hier das Ergebnis wählen."
+        ],
+        "en": [
+          "Under horse, tick \"Horse immortal\".",
+          "Click \"Start\" below and load a savegame with your own horse.",
+          "Mount the horse once and get off again.",
+          "Let enemies attack the horse or hit it with a weapon yourself.",
+          "Quit the game and pick the result here."
+        ]
+      },
+      "expect": {
+        "de": "Das Pferd verliert keine Lebenspunkte und stirbt nicht.",
+        "en": "The horse loses no hit points and does not die."
+      }
+    },
+    {
+      "id": "whistle-range-ingame",
+      "since": "1.1.0",
+      "needs_run": true,
+      "experimental": "horse",
+      "title": {
+        "de": "Pfeifreichweite",
+        "en": "Whistle range"
+      },
+      "why": {
+        "de": "Die Reichweite wird im Speicher geändert. Offen ist, ob das Pferd aus der eingestellten Entfernung wirklich kommt.",
+        "en": "The range is changed in memory. Open is whether the horse really comes from the set distance."
+      },
+      "steps": {
+        "de": [
+          "Unter Pferd den Haken \"Pfeifreichweite setzen\" setzen und 100 m einstellen.",
+          "Unten auf \"Starten\" klicken und einen Spielstand mit eigenem Pferd laden.",
+          "Absteigen und etwa 70 m weglaufen auf einem freien Weg ohne Wasser.",
+          "Nach dem Pferd pfeifen.",
+          "Spiel beenden und hier das Ergebnis wählen."
+        ],
+        "en": [
+          "Under horse, tick \"Set whistle range\" and set 100 m.",
+          "Click \"Start\" below and load a savegame with your own horse.",
+          "Get off and walk about 70 m away on a free path without water.",
+          "Whistle for the horse.",
+          "Quit the game and pick the result here."
+        ]
+      },
+      "expect": {
+        "de": "Das Pferd läuft zu dir, obwohl es weiter als die ursprünglichen 40 m weg war.",
+        "en": "The horse runs to you although it was farther than the original 40 m."
+      }
+    }
+  ]
+}

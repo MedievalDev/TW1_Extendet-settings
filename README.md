@@ -39,6 +39,24 @@ The game folder comes from the registry
 (`HKLM\SOFTWARE\WOW6432Node\Reality Pump\TwoWorlds\FileSystem\DataPath`);
 File > Choose game folder overrides it.
 
+## Help testing
+
+Some parts are measured but not yet confirmed in the game by players. The
+tool lists them under **Help > Test untested features**: pick a test, follow
+the steps (the **Start** button launches `TwoWorldsExtended.exe` and notes
+what is visible from outside, like new crash reports), then click **Works**
+or **Does not work**. Two confirmations close a test for everyone; until then
+the lava and horse sections carry "(experimental)".
+
+Open tests: one-click install, fall damage off, lava damage, immortal horse,
+whistle range.
+
+**Help > Report a bug** and the **Report a bug** button in every error
+message send a report to alchemy-fox.de. You see exactly what is sent before
+anything leaves your PC: no names, no e-mail, user names in paths are
+replaced by `<user>`. **Help > Known issues** shows what was reported and its
+status.
+
 ## What is adjustable
 
 | Setting | Original | Meaning |

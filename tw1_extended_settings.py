@@ -7,6 +7,7 @@ Deutsche Texte sind die Quelle (tr), englische Tabelle am Dateiende.
 """
 import ctypes
 import datetime
+import traceback
 import json
 import os
 import shutil
@@ -17,6 +18,7 @@ from tkinter import ttk, filedialog, messagebox
 
 import theme
 import twse_patch
+import foxfeedback_ui
 from theme import (BG, PANEL, FIELD, CANVAS_BG, LINE, SEL, INK, MUT, DIM,
                    GOLD, GOLD_HI, OK, ERR, FONT, FONT_BOLD, FONT_SMALL,
                    FONT_MONO, FONT_H2)
@@ -42,7 +44,9 @@ DATEN = (os.path.join(os.environ.get('LOCALAPPDATA', HERE), 'TW1ExtendedSettings
          if FROZEN else HERE)
 KONFIG_DATEI = os.path.join(DATEN, 'tw1_extended_settings.json')
 ICON = os.path.join(RES, 'tw1_extended.ico')
-VERSION = '1.1'
+UNTESTED = os.path.join(RES, 'untested.json')
+FEEDBACK_SLUG = 'extendedsettings'
+VERSION = '1.2.0'
 
 # Originalwerte des Spiels (TwoWorlds.exe 1.7), siehe tw_extended.c
 STANDARD = {
@@ -272,9 +276,18 @@ class App(tk.Tk):
         self.update_idletasks()
         self.deiconify()
         theme.dark_titlebar(self)
+        self.fb = foxfeedback_ui.FeedbackUI(
+            self, FEEDBACK_SLUG, VERSION,
+            cfg_get=lambda k, d=None: self.konfig.get(k, d),
+            cfg_set=self._fb_set, lang=self.lang, tests_file=UNTESTED,
+            open_guide=lambda *_a: self.guide_starten(),
+            tool_name='TW1 Extended Settings', launcher=self._fb_launcher())
+        self.report_callback_exception = self._absturz
+        self._exp_labels()
         self._tick_job = self.after(1500, self._tick)
         if not konfig.get('guide_seen'):
             self.after(400, self.guide_starten)
+        self.after(1200, self.fb.start)
 
     # ---------------------------------------------------------- Menueleiste
     def bau_menueleiste(self):
@@ -346,10 +359,79 @@ class App(tk.Tk):
         m.add_command(label=tr('Guide starten'), accelerator='F1', command=self.guide_starten)
         m.add_command(label=tr('Kurzanleitung'), command=self.kurzanleitung)
         m.add_separator()
+        self.fb.add_menu_items(m)
+        m.add_separator()
         for name, url in self.links():
             m.add_command(label=f'{name}  ({url})', command=lambda u=url: webbrowser.open(u))
         m.add_separator()
         m.add_command(label=tr('Über'), command=self.ueber)
+
+    # ---------------------------------------------------------- Rueckmeldung
+    def _fb_set(self, key, value):
+        self.konfig[key] = value
+        self.konfig.save()
+
+    def _fb_launcher(self):
+        """Spiel fuer "Starten" im Testfenster: TwoWorldsExtended.exe zuerst,
+        dazu ins Protokoll, was das Tool eingestellt hat (nur Werte)."""
+        if not self.spiel or not os.path.isdir(self.spiel):
+            return None
+
+        def eigene_zeilen():
+            w = self.werte_aus_feldern()
+            zeilen = ['settings: ' + ', '.join(f'{k}={w[k]}' for k in sorted(w))]
+            zeilen.append('twse present: %s' % self.twse_da())
+            zeilen.append('plugin present: %s' % os.path.exists(
+                os.path.join(self.spiel, 'TWSEPlugins', PLUGIN_DLL)))
+            return zeilen
+        la = foxfeedback_ui.tw1_launcher(self.spiel, extra_before=eigene_zeilen)
+        la.names.sort(key=lambda n: (n.lower() != TWSE_EXE.lower(), n.lower()))
+        return la
+
+    def _exp_labels(self):
+        """Bereiche mit ungetesteten Neuerungen tragen "(experimentell)",
+        bis zwei Leute den Test bestaetigt haben."""
+        for box, titel, label in ((self.box_lava, tr('Lavaschaden'), 'lava'),
+                                  (self.box_horse, tr('Pferd'), 'horse')):
+            if self.fb.experimental(label):
+                titel += '  ' + tr('(experimentell)')
+            if box.cget('text') != titel:
+                box.configure(text=titel)
+
+    def fehler(self, text, key, fp_en):
+        """Fehlerdialog mit "Bug melden". ``key`` und ``fp_en`` sind feste
+        englische Texte ohne Nutzerdaten (oeffentlicher Titel)."""
+        self.fb.log.add('error ' + key)
+        dlg = tk.Toplevel(self)
+        dlg.title(TOOL_NAME)
+        dlg.transient(self)
+        dlg.resizable(False, False)
+        rahmen = ttk.Frame(dlg, padding=16)
+        rahmen.pack(fill='both', expand=True)
+        ttk.Label(rahmen, text=text, foreground=ERR, wraplength=440, justify='left').pack(anchor='w', pady=(0, 12))
+        reihe = ttk.Frame(rahmen)
+        reihe.pack(fill='x')
+        ttk.Button(reihe, text=tr('Bug melden'), command=lambda: self.fb.report_bug(
+            parent=dlg, error_text=text, error_key=key,
+            title=f'{key}: {fp_en}', fp_text=fp_en)).pack(side='left')
+        ttk.Button(reihe, text=tr('Schließen'), style='Accent.TButton', command=dlg.destroy).pack(side='right')
+        theme.dark_titlebar(dlg)
+        dlg.grab_set()
+        return dlg
+
+    def _absturz(self, typ, wert, tb):
+        """Unerwartete Ausnahme: Meldung mit Bug-melden-Knopf statt stillem Fehler."""
+        stelle = ''
+        for fs in reversed(traceback.extract_tb(tb)):
+            if os.path.basename(fs.filename).startswith(('tw1_extended', 'twse_patch')):
+                stelle = f'{os.path.basename(fs.filename)}:{fs.lineno}'
+                break
+        text = ''.join(traceback.format_exception(typ, wert, tb))
+        try:
+            self.fehler(tr('Unerwarteter Fehler: {fehler}').format(fehler=f'{typ.__name__}: {wert}') + '\n\n' + text[-1500:],
+                        'crash', f'{typ.__name__} at {stelle or "unknown"}')
+        except tk.TclError:
+            pass
 
     def links(self):
         return ((tr('GitHub-Repo'), GITHUB_URL), ('Alchemy Fox', SITE_URL),
@@ -589,8 +671,10 @@ class App(tk.Tk):
             ini_schreiben(self.ini_pfad(), w)
         except OSError as e:
             self.melden(tr('Schreiben fehlgeschlagen: {fehler}').format(fehler=e), 'err')
+            self.fb.log.add('error settings.write_failed')
             return False
         self.werte = w
+        self.fb.log.add('settings applied')
         jetzt = datetime.datetime.now().strftime('%H:%M:%S')
         if prozess_laeuft((TWSE_EXE, 'TwoWorlds.exe')):
             self.melden(tr('Angewendet {zeit}. Das laufende Spiel übernimmt die Werte innerhalb einer Sekunde.').format(zeit=jetzt), 'ok')
@@ -617,7 +701,7 @@ class App(tk.Tk):
             return
         pfad = os.path.normpath(pfad)
         if not os.path.exists(os.path.join(pfad, 'TwoWorlds.exe')):
-            messagebox.showerror(TOOL_NAME, tr('In diesem Ordner liegt keine TwoWorlds.exe.'))
+            self.fehler(tr('In diesem Ordner liegt keine TwoWorlds.exe.'), 'gamedir.no_exe', 'No TwoWorlds.exe in the chosen folder')
             return
         self.spiel = pfad
         self.konfig['game_dir'] = pfad
@@ -655,7 +739,7 @@ class App(tk.Tk):
             os.startfile(os.path.join(self.spiel, TWSE_EXE), cwd=self.spiel)
             self.melden(tr('Spiel gestartet (TwoWorldsExtended.exe).'), 'ok')
         except OSError as e:
-            self.melden(tr('Start fehlgeschlagen: {fehler}').format(fehler=e), 'err')
+            self.fehler(tr('Start fehlgeschlagen: {fehler}').format(fehler=e), 'game.start_failed', 'Starting TwoWorldsExtended.exe failed')
 
     def plugin_installieren(self):
         if not self.spiel:
@@ -663,7 +747,7 @@ class App(tk.Tk):
             return
         quelle = self.plugin_quelle()
         if not quelle:
-            messagebox.showerror(TOOL_NAME, tr('TWExtended.dll liegt nicht neben dem Tool.'))
+            self.fehler(tr('TWExtended.dll liegt nicht neben dem Tool.'), 'install.no_plugin', 'Plugin DLL missing next to the tool')
             return
         if prozess_laeuft((TWSE_EXE, 'TwoWorlds.exe')):
             messagebox.showwarning(TOOL_NAME, tr('Bitte das Spiel beenden, dann das Plugin installieren.'))
@@ -674,7 +758,7 @@ class App(tk.Tk):
             try:
                 getan += twse_patch.installieren(self.spiel, twse_dll)
             except (OSError, ValueError) as e:
-                messagebox.showerror(TOOL_NAME, tr('TWSE anlegen fehlgeschlagen: {fehler}').format(fehler=e))
+                self.fehler(tr('TWSE anlegen fehlgeschlagen: {fehler}').format(fehler=e), 'install.twse_failed', 'Creating TWSE failed')
                 return
         ziel_ordner = os.path.join(self.spiel, 'TWSEPlugins')
         try:
@@ -682,11 +766,12 @@ class App(tk.Tk):
             shutil.copy2(quelle, os.path.join(ziel_ordner, PLUGIN_DLL))
             getan.append('TWSEPlugins\\' + PLUGIN_DLL)
         except OSError as e:
-            messagebox.showerror(TOOL_NAME, tr('Kopieren fehlgeschlagen: {fehler}').format(fehler=e))
+            self.fehler(tr('Kopieren fehlgeschlagen: {fehler}').format(fehler=e), 'install.copy_failed', 'Copying the plugin failed')
             return
         if not self.twse_da():
             messagebox.showinfo(TOOL_NAME, tr('Plugin kopiert, aber TWSE fehlt (twse.dll liegt nicht neben dem Tool). TWSE-Patcher von buglord auf TwoWorlds.exe anwenden, danach über TwoWorldsExtended.exe starten.'))
         else:
+            self.fb.log.add('install ok')
             self.melden(tr('Installiert: {dateien}. Spiel mit "Spiel starten" oder über TwoWorldsExtended.exe starten.').format(dateien=', '.join(getan)), 'ok')
         self.aktualisiere_status()
 
@@ -768,6 +853,7 @@ class App(tk.Tk):
             return
         try:
             self.aktualisiere_status()
+            self._exp_labels()
         except tk.TclError:
             return
         self._tick_job = self.after(1500, self._tick)
@@ -993,7 +1079,8 @@ TEXTE_EN = {
     'In der Exe auf der Platte: {m} m': 'In the exe on disk: {m} m',
     'im laufenden Spiel zuletzt: {m} m': 'last seen in the running game: {m} m',
     '"Pferd unsterblich" schützt das zuletzt gerittene Pferd. Die Pfeifreichweite gilt nur, wenn ihr Schalter an ist; sonst bleibt der Wert aus der Exe.': '"Horse immortal" protects the last ridden horse. The whistle range only applies while its switch is on; otherwise the exe value stays.',
-    'Lavaschaden': 'Lava damage', 'Lavaschaden an': 'Lava damage on', 'Diagnose': 'Diagnostics',
+    'Lavaschaden': 'Lava damage', '(experimentell)': '(experimental)',
+    'Bug melden': 'Report a bug', 'Unerwarteter Fehler: {fehler}': 'Unexpected error: {fehler}', 'Lavaschaden an': 'Lava damage on', 'Diagnose': 'Diagnostics',
     'Lava verhält sich wie Wasser, zieht aber Lebenspunkte ab, solange der Held drin schwimmt.': 'Lava behaves like water but drains hit points while the hero swims in it.',
     'Original 5. Auch hier rechnet das Spiel in Prozent der maximalen Lebenspunkte.': 'Original 5. Here too the game works in percent of max hit points.',
     'Ein Schadenstick alle n Bilder': 'One damage tick every n frames',
