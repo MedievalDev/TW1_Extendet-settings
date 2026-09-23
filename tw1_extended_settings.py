@@ -26,7 +26,7 @@ from theme import (BG, PANEL, FIELD, CANVAS_BG, LINE, SEL, INK, MUT, DIM,
 TOOL_NAME = 'tw1_Extendet-settings'
 GITHUB_URL = 'https://github.com/MedievalDev/TW1_Extendet-settings'
 SITE_URL = 'https://alchemy-fox.de/'
-GUIDE_URL = 'https://alchemy-fox.de/game/TW1_Extendet-settings/'
+GUIDE_URL = 'https://alchemy-fox.de/game/TW1_ExtendedSettings/'
 COMMUNITY_URL = 'https://twmp.alchemy-fox.de/'
 TWSE_URL = 'https://github.com/buglord/Two-Worlds-1-Script-Extender'
 

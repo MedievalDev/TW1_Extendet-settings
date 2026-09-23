@@ -11,6 +11,8 @@ can open itself with the game. Two parts:
 - `tw1_Extendet-settings.exe` - a small window that writes that file, shows the
   plugin status and its log, and installs the plugin into the game folder.
 
+Website: [alchemy-fox.de/game/TW1_ExtendedSettings](https://alchemy-fox.de/game/TW1_ExtendedSettings/)
+
 ## Download
 
 Ready-made files are on the release page:
