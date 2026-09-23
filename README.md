@@ -173,6 +173,11 @@ German, with the first-start guide:
 
 ## Changelog
 
+### 1.3.1 (23.09.2026)
+
+- Help > Guide page opens the new website alchemy-fox.de/game/TW1_ExtendedSettings/
+  (the old address was a dead link). Plugin unchanged.
+
 ### 1.3.0 (23.09.2026)
 
 - **Autostart:** the plugin can open the settings tool when the game starts -

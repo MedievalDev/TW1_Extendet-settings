@@ -46,7 +46,7 @@ KONFIG_DATEI = os.path.join(DATEN, 'tw1_extended_settings.json')
 ICON = os.path.join(RES, 'tw1_extended.ico')
 UNTESTED = os.path.join(RES, 'untested.json')
 FEEDBACK_SLUG = 'extendedsettings'
-VERSION = '1.3.0'
+VERSION = '1.3.1'
 
 # Originalwerte des Spiels (TwoWorlds.exe 1.7), siehe tw_extended.c
 STANDARD = {
