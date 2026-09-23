@@ -166,6 +166,39 @@
         "de": "Das Pferd läuft zu dir, obwohl es weiter als die ursprünglichen 40 m weg war.",
         "en": "The horse runs to you although it was farther than the original 40 m."
       }
+    },
+    {
+      "id": "autostart-with-the-game",
+      "since": "1.3.0",
+      "needs_run": true,
+      "title": {
+        "de": "Autostart: das Tool öffnet sich mit dem Spiel",
+        "en": "Autostart: the tool opens with the game"
+      },
+      "why": {
+        "de": "Der Start aus dem Plugin ist offline geprüft. Ob Two Worlds im Vollbild vorne bleibt, wenn das Tool minimiert aufgeht, lässt sich nur im Spiel sehen.",
+        "en": "Starting from the plugin is tested offline. Whether Two Worlds stays in front in fullscreen when the tool opens minimized can only be seen in the game."
+      },
+      "steps": {
+        "de": [
+          "Im Tool rechts \"Aktualisieren (TWSE + Plugin)\" klicken (neues Plugin 1.3.0).",
+          "Unter Autostart \"Beim Spielstart öffnen\" anhaken, \"Minimiert starten\" und \"Mit dem Spiel schließen\" angehakt lassen.",
+          "Das Tool schließen und das Spiel über TwoWorldsExtended.exe im Vollbild starten.",
+          "Im Spiel kurz umsehen, dann mit Alt+Tab zum Tool wechseln (es liegt minimiert in der Taskleiste), einen Wert ändern, zurück ins Spiel.",
+          "Das Spiel beenden."
+        ],
+        "en": [
+          "In the tool click \"Update (TWSE + plugin)\" on the right (new plugin 1.3.0).",
+          "Under Autostart tick \"Open when the game starts\", leave \"Start minimized\" and \"Close with the game\" ticked.",
+          "Close the tool and start the game via TwoWorldsExtended.exe in fullscreen.",
+          "Look around in the game, then Alt+Tab to the tool (it sits minimized in the taskbar), change a value, back into the game.",
+          "Quit the game."
+        ]
+      },
+      "expect": {
+        "de": "Das Spiel bleibt beim Start im Vordergrund, das Tool liegt minimiert in der Taskleiste, die Änderung wirkt im Spiel, und nach dem Beenden des Spiels ist auch das Tool zu.",
+        "en": "The game stays in front at start, the tool sits minimized in the taskbar, the change takes effect in the game, and after quitting the game the tool is closed too."
+      }
     }
   ]
 }

@@ -40,6 +40,11 @@
  *    werden auf Wunsch umgeleitet und jeder HP-Verlust mit Ruecksprungadresse
  *    protokolliert.
  *
+ *  Autostart: Steht [Autostart] Enabled=1 in der ini, startet das Plugin
+ *    beim Spielstart das Einstellungs-Tool (ToolPath/ToolArgs traegt das Tool
+ *    selbst ein) mit --from-game <PID> und auf Wunsch --minimized. Laeuft das
+ *    Tool schon (Mutex Local\TW1ExtendedSettings), passiert nichts.
+ *
  * Build: tcc -shared -o TWExtended.dll tw_extended.c   (siehe build_extended.bat)
  */
 #include <windows.h>
@@ -109,11 +114,16 @@ typedef struct {
 	int   horseImmortal;   /* Pferd des Helden nimmt keinen Schaden */
 	int   whistleMeters;   /* Pfeifreichweite in Metern, 0 = Exe unveraendert (Original 40) */
 	int   logDamage;       /* Diagnose: jeden HP-Verlust des Helden loggen */
+	int   autoStart;       /* Einstellungs-Tool beim Spielstart oeffnen */
+	int   autoMinimized;   /* ... minimiert, das Spiel behaelt den Fokus */
+	char  toolPath[MAX_PATH];  /* Exe des Tools (oder pythonw.exe) */
+	char  toolArgs[MAX_PATH];  /* Zusatzargumente, im Skriptmodus der Skriptpfad */
 } Settings;
 
 static Settings cfg;
 static FILETIME g_iniTime;
 static int g_iniSeen = 0;
+static int g_autoResult = 0;   /* 0 aus, 1 gestartet, 2 lief schon, -1 Fehler */
 
 static void defaults(Settings *s){
 	s->fallEnabled = 1; s->fallPercent = 100; s->fallMinHeight = 8.0f;
@@ -122,6 +132,8 @@ static void defaults(Settings *s){
 	s->lavaEnabled = 1; s->lavaPercent = 5; s->lavaEvery = 1;
 	s->horseImmortal = 0; s->whistleMeters = 0;
 	s->logDamage = 0;
+	s->autoStart = 0; s->autoMinimized = 1;
+	s->toolPath[0] = 0; s->toolArgs[0] = 0;
 }
 
 static int clampi(int v, int lo, int hi){ return v < lo ? lo : (v > hi ? hi : v); }
@@ -133,13 +145,28 @@ static void trim(char *s){
 	while(n > 0 && (s[n-1] == ' ' || s[n-1] == '\t' || s[n-1] == '\r' || s[n-1] == '\n')) s[--n] = 0;
 }
 
+/* Pfade duerfen ; und # enthalten: ToolPath/ToolArgs lesen den Rest der Zeile
+ * ohne Kommentar. Gibt 1 zurueck, wenn die Zeile so ein Schluessel war. */
+static int rawPathKey(const char *sect, char *line, Settings *s){
+	char *eq = strchr(line, '=');
+	if(!eq || stricmp(sect, "Autostart") != 0) return 0;
+	char key[32]; int n = (int)(eq - line);
+	if(n <= 0 || n >= (int)sizeof key) return 0;
+	memcpy(key, line, n); key[n] = 0; trim(key);
+	char *dst = stricmp(key, "ToolPath") == 0 ? s->toolPath : stricmp(key, "ToolArgs") == 0 ? s->toolArgs : 0;
+	if(!dst) return 0;
+	strncpy(dst, eq + 1, MAX_PATH - 1); dst[MAX_PATH - 1] = 0; trim(dst);
+	return 1;
+}
+
 /* Sehr kleiner INI-Leser: [Sektion] und Schluessel=Wert, ; oder # als Kommentar. */
 static int readIni(Settings *s){
 	char p[MAX_PATH]; pathOf(p, INI_NAME);
 	FILE *f = fopen(p, "r");
 	if(!f) return 0;
-	char line[256], sect[64] = "";
+	char line[1024], sect[64] = "";
 	while(fgets(line, sizeof line, f)){
+		if(rawPathKey(sect, line, s)) continue;
 		char *c = strchr(line, ';'); if(c) *c = 0;
 		c = strchr(line, '#'); if(c) *c = 0;
 		trim(line);
@@ -171,6 +198,9 @@ static int readIni(Settings *s){
 			else if(stricmp(key, "WhistleRangeMeters") == 0) s->whistleMeters = clampi(iv, 0, 20000);
 		}else if(stricmp(sect, "Diagnose") == 0){
 			if(stricmp(key, "LogDamage") == 0)        s->logDamage = iv != 0;
+		}else if(stricmp(sect, "Autostart") == 0){
+			if(stricmp(key, "Enabled") == 0)          s->autoStart = iv != 0;
+			else if(stricmp(key, "Minimized") == 0)   s->autoMinimized = iv != 0;
 		}
 	}
 	fclose(f);
@@ -202,7 +232,11 @@ static void writeDefaultIni(void){
 		"Immortal=0       ; 1 = the hero's horse takes no damage\n"
 		"WhistleRangeMeters=0 ; distance the horse answers the whistle from (original 40), 0 = leave the exe as it is\n"
 		"\n[Diagnose]\n"
-		"LogDamage=0      ; 1 = log every HP loss of the hero to TWExtended.log\n");
+		"LogDamage=0      ; 1 = log every HP loss of the hero to TWExtended.log\n"
+		"\n[Autostart]\n"
+		"Enabled=0        ; 1 = open the settings tool when the game starts (the tool fills in ToolPath)\n"
+		"Minimized=1      ; 1 = open it minimized, the game keeps the focus\n"
+		"CloseWithGame=1  ; 1 = the tool closes when the game ends\n");
 	fclose(f);
 }
 
@@ -506,6 +540,7 @@ static void writeStatus(void){
 		cfg.fallEnabled, cfg.fallPercent, cfg.fallMinHeight, cfg.fallDeathHeight, cfg.fallLethal,
 		cfg.slideEnabled, cfg.slidePercent, cfg.slideGrace, cfg.lavaEnabled, cfg.lavaPercent, cfg.lavaEvery,
 		cfg.horseImmortal, cfg.whistleMeters, cfg.logDamage);
+	fprintf(f, "autostart=%d,%d,%d\n", cfg.autoStart, cfg.autoMinimized, g_autoResult);
 	fclose(f);
 }
 
@@ -533,6 +568,84 @@ static void loadAndApply(const char *why){
 	applySettings(why);
 }
 
+/* --------------------------------------------------------- */
+/* Autostart: das Einstellungs-Tool mit dem Spiel oeffnen     */
+/* --------------------------------------------------------- */
+
+#define TOOL_MUTEX "Local\\TW1ExtendedSettings"   /* legt das Tool an, solange es laeuft */
+
+static int toolRunning(void){
+	HANDLE m = OpenMutexA(SYNCHRONIZE, FALSE, TOOL_MUTEX);
+	if(!m) return 0;
+	CloseHandle(m);
+	return 1;
+}
+
+/* Baut die Befehlszeile. Das Tool bekommt die PID des Spiels, damit es sich mit
+ * ihm schliessen kann, und --minimized, damit es dem Spiel den Fokus laesst. */
+static int buildToolCommand(char *out, int size, const Settings *s, DWORD pid){
+	int n = _snprintf(out, size, "\"%s\"%s%s --from-game %lu%s", s->toolPath,
+		s->toolArgs[0] ? " " : "", s->toolArgs, (unsigned long)pid, s->autoMinimized ? " --minimized" : "");
+	if(n < 0 || n >= size){ out[size - 1] = 0; return 0; }
+	return 1;
+}
+
+/* Die ini schreibt das Tool als UTF-8: Pfade mit Umlauten gehen nur ueber die
+ * Wide-API richtig durch. */
+#ifndef CP_UTF8
+#define CP_UTF8 65001   /* fehlt in den Headern von tcc */
+WINBASEAPI int WINAPI MultiByteToWideChar(UINT cp, DWORD flags, LPCSTR src, int n, LPWSTR dst, int size);
+#endif
+static int utf8ToWide(const char *in, wchar_t *out, int size){
+	int n = MultiByteToWideChar(CP_UTF8, 0, in, -1, out, size);
+	if(n <= 0){ out[0] = 0; return 0; }
+	return 1;
+}
+
+static void autostartTool(void){
+	if(!cfg.autoStart){ g_autoResult = 0; return; }
+	if(toolRunning()){
+		g_autoResult = 2;
+		printf("[%s] Autostart: Einstellungs-Tool laeuft schon
+", PLUG_NAME);
+		return;
+	}
+	wchar_t wpath[MAX_PATH];
+	if(!cfg.toolPath[0] || !utf8ToWide(cfg.toolPath, wpath, MAX_PATH)
+	   || GetFileAttributesW(wpath) == INVALID_FILE_ATTRIBUTES){
+		g_autoResult = -1;
+		printf("[%s] Autostart: Tool nicht gefunden (%s) - das Tool einmal oeffnen, es traegt seinen Pfad selbst ein
+",
+			PLUG_NAME, cfg.toolPath[0] ? cfg.toolPath : "ToolPath fehlt");
+		return;
+	}
+	char cmd[3 * MAX_PATH];
+	wchar_t wcmd[3 * MAX_PATH], wdir[MAX_PATH];
+	if(!buildToolCommand(cmd, sizeof cmd, &cfg, GetCurrentProcessId()) || !utf8ToWide(cmd, wcmd, 3 * MAX_PATH)){
+		g_autoResult = -1;
+		printf("[%s] Autostart: Befehlszeile zu lang
+", PLUG_NAME);
+		return;
+	}
+	wcscpy(wdir, wpath);
+	wchar_t *cut = wcsrchr(wdir, L'\\'); if(cut) *cut = 0; else wdir[0] = 0;
+	STARTUPINFOW si; PROCESS_INFORMATION pi;
+	memset(&si, 0, sizeof si); memset(&pi, 0, sizeof pi);
+	si.cb = sizeof si;
+	si.dwFlags = STARTF_USESHOWWINDOW;
+	si.wShowWindow = cfg.autoMinimized ? SW_SHOWMINNOACTIVE : SW_SHOWNOACTIVATE;
+	if(CreateProcessW(NULL, wcmd, NULL, NULL, FALSE, 0, NULL, wdir[0] ? wdir : NULL, &si, &pi)){
+		CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
+		g_autoResult = 1;
+		printf("[%s] Autostart: Einstellungs-Tool gestartet%s
+", PLUG_NAME, cfg.autoMinimized ? " (minimiert)" : "");
+	}else{
+		g_autoResult = -1;
+		printf("[%s] Autostart: Start fehlgeschlagen (Fehler %lu): %s
+", PLUG_NAME, (unsigned long)GetLastError(), cmd);
+	}
+}
+
 static int cmd_reload(int unused){ loadAndApply("Konsole"); return 1; }
 static int cmd_status(int unused){ applySettings("Status"); return 1; }
 static int cmd_log(int on){ cfg.logDamage = on != 0; applySettings("Log"); return cfg.logDamage; }
@@ -551,6 +664,8 @@ static void frameTick(void *RES){
 static void initPlugin(void *RES){
 	initGameDir();
 	loadAndApply("Start");
+	autostartTool();
+	writeStatus();
 	info->addCommand_Advanced("twext.reload", (void *)cmd_reload, TW_CMD_NONE, TW_CMD_INT);
 	info->addCommand_Advanced("twext.status", (void *)cmd_status, TW_CMD_NONE, TW_CMD_INT);
 	info->addCommand_Advanced("twext.log",    (void *)cmd_log,    TW_CMD_INT,  TW_CMD_INT);
@@ -560,7 +675,7 @@ static void initPlugin(void *RES){
 
 #define REQVER 1
 #define PLUGINVER 1
-#define PLUGINREV 3
+#define PLUGINREV 4
 
 EXPORT int WINAPI InitPlugin(TWSE_INFO* gInfo, _GetFork gf){
 	info = gInfo;
@@ -575,7 +690,7 @@ PLUGIN_INFO THIS_PLUG_INFO = {
 	Version: PLUGINVER,
 	Revision: PLUGINREV,
 	Name: L"TWExtended",
-	Description: L"Adjustable fall, slide and lava damage, immortal horse, whistle range, damage diagnostics; settings from tw1_Extendet-settings.ini",
+	Description: L"Adjustable fall, slide and lava damage, immortal horse, whistle range, damage diagnostics, opens the settings tool with the game; settings from tw1_Extendet-settings.ini",
 	Credits: L"Built on TWSE by buglord",
 	License: LICENSE_CC0,
 0};

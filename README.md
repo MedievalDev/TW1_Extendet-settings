@@ -1,7 +1,8 @@
 # tw1_Extendet-settings
 
 Adjustable damage for **Two Worlds 1 (v1.7)**: fall, slide and lava damage,
-an immortal horse and the whistle range, live while the game runs. Two parts:
+an immortal horse and the whistle range, live while the game runs. The tool
+can open itself with the game. Two parts:
 
 - `TWExtended.dll` - a plugin for buglord's
   [Two Worlds Script Extender (TWSE)](https://github.com/buglord/Two-Worlds-1-Script-Extender).
@@ -13,7 +14,7 @@ an immortal horse and the whistle range, live while the game runs. Two parts:
 ## Download
 
 Ready-made files are on the release page:
-[TW1_Extendet-settings v1.1](https://github.com/MedievalDev/TW1_Extendet-settings/releases/tag/v1.1)
+[latest release](https://github.com/MedievalDev/TW1_Extendet-settings/releases/latest)
 (`tw1_Extendet-settings.exe` with the plugin and TWSE embedded, and
 `TWExtended.dll` alone). Windows SmartScreen may warn about the unsigned exe; "More info >
 Run anyway".
@@ -30,6 +31,22 @@ Run anyway".
    the plain exe loads no plugins.
 3. Move the sliders. Every change is written after a second; the running game
    picks it up within another second. **Original values** restores the game.
+
+### Autostart (1.3.0)
+
+Under **Autostart**, tick **Open when the game starts**. From the next start
+via `TwoWorldsExtended.exe` the plugin opens the tool together with the game:
+
+- **Start minimized** (default on): the tool opens minimized and does not take
+  the focus, so the fullscreen game stays in front. Alt+Tab to it, change a
+  value, it takes effect right away. Untick it with two monitors.
+- **Close with the game** (default on): the tool quits when the game quits.
+- The tool writes its own path into the `[Autostart]` section of the ini
+  (`ToolPath`, `ToolArgs`), so it does not matter where the exe lives. It never
+  runs twice: it holds the lock `Local\TW1ExtendedSettings`, and the plugin
+  skips the start while it is held.
+- Needs the plugin from 1.3.0 - the status on the right says "outdated" until
+  **Update** has copied it.
 
 `twse_patch.py` is the Python port of `twse_patcher.c` from the TWSE
 repository (CC0), same byte changes and the same DJB2 checks, so it refuses
@@ -49,7 +66,7 @@ or **Does not work**. Two confirmations close a test for everyone; until then
 the lava and horse sections carry "(experimental)".
 
 Open tests: one-click install, fall damage off, lava damage, immortal horse,
-whistle range.
+whistle range, autostart with the game.
 
 **Help > Report a bug** and the **Report a bug** button in every error
 message send a report to alchemy-fox.de. You see exactly what is sent before
@@ -75,6 +92,9 @@ status.
 | Horse immortal | off | the last ridden horse takes no damage, its HP stay full |
 | Whistle range | 40 m | distance the horse answers the whistle from; switch off = leave the exe value (a patched exe keeps its value) |
 | Log damage | off | log every HP loss of the hero with the caller address |
+| Open when the game starts | off | the plugin opens this tool with the game |
+| Start minimized | on | the game keeps the focus |
+| Close with the game | on | the tool quits when the game quits |
 
 ## Trainer
 
@@ -121,8 +141,9 @@ Files next to the game exe: `tw1_Extendet-settings.ini`, `TWExtended.log`,
 
 ## Build
 
-- Plugin: `build_extended.bat` (Tiny C Compiler, 32-bit; `..\tcc\tcc.exe`).
-  Offline tests: `tcc -o t.exe test_extended.c && t.exe`.
+- Plugin: `build_extended.bat` (Tiny C Compiler, 32-bit; `..\tcc\tcc.exe` or
+  `set TCC=...`). Offline tests: `tcc -Itwse -o t.exe test_extended.c && t.exe`.
+- Tool tests: `py -3.13 -m unittest discover -s tests -t .`
 - Tool exe: `build_settings_exe.bat` (PyInstaller, Python 3.13). Embeds the
   plugin DLL from `bin\TWSEPlugins\` and `bin\twse.dll` (TWSE by buglord,
   CC0). Run the plugin build first.
@@ -147,3 +168,20 @@ Lower part: lava, horse, diagnostics:
 German, with the first-start guide:
 
 ![Guide](docs/tool_de_guide.png)
+
+## Changelog
+
+### 1.3.0 (23.09.2026)
+
+- **Autostart:** the plugin can open the settings tool when the game starts -
+  minimized without taking the focus, and closing again with the game. Off by
+  default; section `[Autostart]` in the ini.
+- The tool runs only once; a second start brings the open window to the front.
+- The status shows when the installed plugin is older than the one in the tool.
+- Plugin revision 4: reads `ToolPath`/`ToolArgs` verbatim (paths may contain
+  `;` and `#`), starts the tool through the Unicode API (paths with umlauts),
+  writes the autostart result to `TWExtended.status`.
+
+### 1.2.0 (20.09.2026)
+
+- Test window, bug reports and known issues.

@@ -64,6 +64,25 @@ int main(){
 	for(int i = 0; i < 6; i++) lavaTick(ctrl);
 	CHECK(calls_fall == 2 && last_fall == 9);
 	cfg.lavaEnabled = 0; reset_ctrl(0, 500, 500); lavaTick(ctrl); CHECK(calls_fall == 0);
+	/* Autostart: Standard aus, Pfade mit ; und # bleiben ganz */
+	writeDefaultIni(); defaults(&cfg); cfg.autoStart = 1; CHECK(readIni(&cfg) == 1 && cfg.autoStart == 0 && cfg.autoMinimized == 1 && cfg.toolPath[0] == 0);
+	f = fopen(INI_NAME, "w");
+	fprintf(f, "[Diagnose]\nToolPath=C:\\falsch.exe\n[Autostart]\nEnabled=1 ; an\nMinimized=0\n"
+	           "ToolPath=C:\\Spiele\\Mods;#1\\tw1_Extendet-settings.exe\nToolArgs = \"C:\\a b\\tool.py\"\n");
+	fclose(f);
+	defaults(&cfg); CHECK(readIni(&cfg) == 1);
+	CHECK(cfg.autoStart == 1 && cfg.autoMinimized == 0);
+	CHECK(strcmp(cfg.toolPath, "C:\\Spiele\\Mods;#1\\tw1_Extendet-settings.exe") == 0);
+	CHECK(strcmp(cfg.toolArgs, "\"C:\\a b\\tool.py\"") == 0);
+	{
+		char cmd[3 * MAX_PATH];
+		CHECK(buildToolCommand(cmd, sizeof cmd, &cfg, 4242));
+		CHECK(strcmp(cmd, "\"C:\\Spiele\\Mods;#1\\tw1_Extendet-settings.exe\" \"C:\\a b\\tool.py\" --from-game 4242") == 0);
+		cfg.autoMinimized = 1; cfg.toolArgs[0] = 0;
+		CHECK(buildToolCommand(cmd, sizeof cmd, &cfg, 7));
+		CHECK(strcmp(cmd, "\"C:\\Spiele\\Mods;#1\\tw1_Extendet-settings.exe\" --from-game 7 --minimized") == 0);
+		CHECK(!buildToolCommand(cmd, 20, &cfg, 7));
+	}
 	remove(INI_NAME);
 	fprintf(stderr, fails ? "FEHLER: %d\n" : "ALLE TESTS OK\n", fails);
 	return fails != 0;

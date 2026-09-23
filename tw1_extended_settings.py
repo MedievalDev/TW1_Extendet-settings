@@ -46,7 +46,7 @@ KONFIG_DATEI = os.path.join(DATEN, 'tw1_extended_settings.json')
 ICON = os.path.join(RES, 'tw1_extended.ico')
 UNTESTED = os.path.join(RES, 'untested.json')
 FEEDBACK_SLUG = 'extendedsettings'
-VERSION = '1.2.0'
+VERSION = '1.3.0'
 
 # Originalwerte des Spiels (TwoWorlds.exe 1.7), siehe tw_extended.c
 STANDARD = {
@@ -56,6 +56,7 @@ STANDARD = {
     'lava_enabled': 1, 'lava_percent': 5, 'lava_every': 1,
     'horse_immortal': 0, 'whistle_set': 0, 'whistle_m': 40,
     'log_damage': 0,
+    'auto_start': 0, 'auto_min': 1, 'auto_close': 1,
 }
 WHISTLE_ORIGINAL_M = 40
 WHISTLE_FILE_OFFSET = 0x280C8B   # Immediate von "cmp eax, 0xA00" in TwoWorlds(Extended).exe 1.7, 64 je Meter
@@ -75,7 +76,11 @@ INI_KEYS = (  # (Sektion, Schluessel, unser Name, Typ)
     ('Horse', 'Immortal', 'horse_immortal', int),
     ('Horse', 'WhistleRangeMeters', 'whistle_ini', int),
     ('Diagnose', 'LogDamage', 'log_damage', int),
+    ('Autostart', 'Enabled', 'auto_start', int),
+    ('Autostart', 'Minimized', 'auto_min', int),
+    ('Autostart', 'CloseWithGame', 'auto_close', int),
 )
+TOOL_MUTEX = 'Local\\TW1ExtendedSettings'   # dieselbe Sperre prueft das Plugin vor dem Autostart
 
 
 # --------------------------------------------------------------------------
@@ -164,6 +169,16 @@ def ini_lesen(pfad):
     return werte, True
 
 
+def tool_befehl():
+    """(Programm, Argumente), mit denen das Plugin dieses Tool startet: die Exe
+    selbst, im Skriptmodus pythonw.exe mit dem Skriptpfad."""
+    if FROZEN:
+        return os.path.abspath(sys.executable), ''
+    exe = sys.executable
+    w = os.path.join(os.path.dirname(exe), 'pythonw.exe')
+    return (w if os.path.isfile(w) else exe), f'"{os.path.abspath(__file__)}"'
+
+
 def ini_schreiben(pfad, w):
     text = (
         f'; {TOOL_NAME} - written by the tool, read by TWExtended.dll (Two Worlds 1.7)\n'
@@ -186,7 +201,14 @@ def ini_schreiben(pfad, w):
         f'Immortal={int(w["horse_immortal"])}       ; 1 = the hero\'s horse takes no damage\n'
         f'WhistleRangeMeters={int(w["whistle_m"]) if w["whistle_set"] else 0} ; distance the horse answers the whistle from (original 40), 0 = leave the exe as it is\n'
         '\n[Diagnose]\n'
-        f'LogDamage={int(w["log_damage"])}      ; 1 = log every HP loss of the hero to TWExtended.log\n')
+        f'LogDamage={int(w["log_damage"])}      ; 1 = log every HP loss of the hero to TWExtended.log\n'
+        '\n[Autostart]\n'
+        f'Enabled={int(w["auto_start"])}        ; 1 = the plugin opens this tool when the game starts\n'
+        f'Minimized={int(w["auto_min"])}      ; 1 = open it minimized, the game keeps the focus\n'
+        f'CloseWithGame={int(w["auto_close"])}  ; 1 = the tool closes when the game ends\n'
+        '; ToolPath and ToolArgs are written by the tool itself (no comments on these lines)\n'
+        f'ToolPath={tool_befehl()[0]}\n'
+        f'ToolArgs={tool_befehl()[1]}\n')
     tmp = pfad + '.tmp'
     with open(tmp, 'w', encoding='utf-8') as f:
         f.write(text)
@@ -244,8 +266,88 @@ def prozess_laeuft(namen):
 # Hauptfenster
 # --------------------------------------------------------------------------
 
+def einzige_instanz():
+    """Legt die Sperre an, die das Plugin vor dem Autostart prueft. Gibt den
+    Handle zurueck, oder None, wenn das Tool schon laeuft."""
+    try:
+        k32 = ctypes.windll.kernel32
+        k32.CreateMutexW.restype = ctypes.c_void_p
+        h = k32.CreateMutexW(None, False, TOOL_MUTEX)
+        if h and k32.GetLastError() == 183:          # ERROR_ALREADY_EXISTS
+            k32.CloseHandle(ctypes.c_void_p(h))
+            return None
+        return h or True
+    except Exception:
+        return True
+
+
+def fenster_nach_vorn():
+    """Holt das schon laufende Tool nach vorn (Fenstertitel beginnt mit dem Namen)."""
+    try:
+        u32 = ctypes.windll.user32
+        gefunden = []
+
+        @ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+        def je_fenster(hwnd, _l):
+            n = u32.GetWindowTextLengthW(hwnd)
+            if n:
+                buf = ctypes.create_unicode_buffer(n + 1)
+                u32.GetWindowTextW(hwnd, buf, n + 1)
+                if buf.value.startswith(TOOL_NAME + ' ') and u32.IsWindowVisible(hwnd):
+                    gefunden.append(hwnd)
+                    return False
+            return True
+        u32.EnumWindows(je_fenster, 0)
+        if gefunden:
+            u32.ShowWindow(ctypes.c_void_p(gefunden[0]), 9)      # SW_RESTORE
+            u32.SetForegroundWindow(ctypes.c_void_p(gefunden[0]))
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def auf_prozessende_warten(pid, fertig):
+    """Wartet in einem Thread auf das Ende des Spielprozesses und ruft dann
+    fertig() - nur ein Flag setzen, Tk ist aus dem Thread tabu."""
+    import threading
+
+    def warten():
+        try:
+            k32 = ctypes.windll.kernel32
+            k32.OpenProcess.restype = ctypes.c_void_p
+            h = k32.OpenProcess(0x00100000, False, int(pid))    # SYNCHRONIZE
+            if not h:
+                fertig()                                        # schon beendet
+                return
+            k32.WaitForSingleObject(ctypes.c_void_p(h), 0xFFFFFFFF)
+            k32.CloseHandle(ctypes.c_void_p(h))
+        except Exception:
+            return
+        fertig()
+    threading.Thread(target=warten, daemon=True).start()
+
+
+def argumente(argv):
+    """--from-game <PID> und --minimized, wie sie das Plugin beim Autostart mitgibt."""
+    pid, mini = None, False
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == '--from-game' and i + 1 < len(argv):
+            try:
+                pid = int(argv[i + 1])
+            except ValueError:
+                pid = None
+            i += 1
+        elif a == '--minimized':
+            mini = True
+        i += 1
+    return pid, mini
+
+
 class App(tk.Tk):
-    def __init__(self, konfig):
+    def __init__(self, konfig, spiel_pid=None, minimiert=False):
         super().__init__()
         self.withdraw()
         self.konfig = konfig
@@ -257,6 +359,9 @@ class App(tk.Tk):
         self._speicher_job = None
         self._laden_aktiv = False
         self.guide = None
+        self.spiel_pid = spiel_pid           # vom Plugin gestartet: PID des Spiels
+        self._spiel_zu = False               # setzt der Warte-Thread, _tick reagiert
+        self._fb_wartet = False
         theme.apply_dark_theme(self)
         self.title(f'{TOOL_NAME} {VERSION}')
         try:
@@ -274,7 +379,10 @@ class App(tk.Tk):
         self.laden()
         self.aktualisiere_status()
         self.update_idletasks()
-        self.deiconify()
+        if minimiert:
+            self.iconify()                   # minimiert, das Spiel behaelt den Fokus
+        else:
+            self.deiconify()
         theme.dark_titlebar(self)
         self.fb = foxfeedback_ui.FeedbackUI(
             self, FEEDBACK_SLUG, VERSION,
@@ -285,9 +393,17 @@ class App(tk.Tk):
         self.report_callback_exception = self._absturz
         self._exp_labels()
         self._tick_job = self.after(1500, self._tick)
-        if not konfig.get('guide_seen'):
-            self.after(400, self.guide_starten)
-        self.after(1200, self.fb.start)
+        if spiel_pid:
+            # mit dem Spiel gestartet: kein Rundgang, das Testfenster erst, wenn
+            # der Spieler das Fenster aufmacht
+            auf_prozessende_warten(spiel_pid, self._spiel_beendet)
+            self.fb.log.add('autostart from game')
+            self._fb_wartet = True
+            self.melden(tr('Mit dem Spiel gestartet. Änderungen wirken sofort im laufenden Spiel.'), 'ok')
+        else:
+            if not konfig.get('guide_seen'):
+                self.after(400, self.guide_starten)
+            self.after(1200, self.fb.start)
 
     # ---------------------------------------------------------- Menueleiste
     def bau_menueleiste(self):
@@ -521,6 +637,18 @@ class App(tk.Tk):
         self.box_diag.pack(fill='x', pady=(0, 8))
         self.schalter(self.box_diag, 'log_damage', tr('Jeden Lebenspunkt-Verlust des Helden protokollieren'),
                       tr('Schreibt Schaden, Lebenspunkte und Aufrufer nach TWExtended.log.'))
+
+        # --- Autostart
+        self.box_auto = ttk.LabelFrame(links, text=tr('Autostart'), padding=(10, 6))
+        self.box_auto.pack(fill='x', pady=(0, 8))
+        self.schalter(self.box_auto, 'auto_start', tr('Beim Spielstart öffnen'),
+                      tr('Das Plugin öffnet dieses Tool, sobald das Spiel über TwoWorldsExtended.exe startet. So lassen sich die Werte mitten im Spiel ändern.'))
+        self.schalter(self.box_auto, 'auto_min', tr('Minimiert starten, das Spiel behält den Fokus'),
+                      tr('Empfohlen im Vollbild: Two Worlds kann sich minimieren, wenn ihm ein Fenster den Fokus nimmt. Mit zwei Monitoren den Haken herausnehmen.'))
+        self.schalter(self.box_auto, 'auto_close', tr('Mit dem Spiel schließen'),
+                      tr('Das Tool beendet sich, wenn das Spiel beendet wird. Gilt nur, wenn das Spiel es gestartet hat.'))
+        self.auto_hinweis = ttk.Label(self.box_auto, text='', style='Muted.TLabel', wraplength=520, justify='left')
+        self.auto_hinweis.pack(anchor='w', pady=(0, 2))
 
         # --- rechts: Status, Knoepfe, Log (von unten gepackt)
         ttk.Label(rechts, text=tr('Status'), style='PanelTitle.TLabel').pack(fill='x')
@@ -788,8 +916,11 @@ class App(tk.Tk):
         z['twse'].configure(text=tr('TWSE (TwoWorldsExtended.exe): {zustand}').format(
             zustand=tr('vorhanden') if twse else tr('fehlt')), foreground=OK if twse else ERR)
         plugin = os.path.exists(os.path.join(self.spiel, 'TWSEPlugins', PLUGIN_DLL))
+        alt = plugin and self.plugin_veraltet()
         z['plugin'].configure(text=tr('Plugin TWExtended.dll: {zustand}').format(
-            zustand=tr('installiert') if plugin else tr('nicht installiert')), foreground=OK if plugin else ERR)
+            zustand=tr('veraltet - "Aktualisieren" klicken') if alt else tr('installiert') if plugin else tr('nicht installiert')),
+            foreground=ERR if (alt or not plugin) else OK)
+        self._auto_hinweis(twse, plugin, alt)
         self.btn_plugin.configure(text=tr('Aktualisieren (TWSE + Plugin)') if (plugin and twse) else tr('Installieren (TWSE + Plugin)'))
         status = self.status_lesen()
         if status:
@@ -810,6 +941,40 @@ class App(tk.Tk):
         self.whistle_hinweis.configure(text=', '.join(teile))
         self.status_rechts.configure(text=f'{TOOL_NAME} {VERSION}')
         self.log_aktualisieren()
+
+    def plugin_veraltet(self):
+        """True, wenn die Plugin-DLL im Spiel nicht die ist, die dieses Tool mitbringt."""
+        quelle = self.plugin_quelle()
+        ziel = os.path.join(self.spiel, 'TWSEPlugins', PLUGIN_DLL)
+        try:
+            if not quelle or os.path.getsize(quelle) != os.path.getsize(ziel):
+                return bool(quelle)
+            with open(quelle, 'rb') as a, open(ziel, 'rb') as b:
+                return a.read() != b.read()
+        except OSError:
+            return False
+
+    def _auto_hinweis(self, twse, plugin, alt):
+        if not getattr(self, 'auto_hinweis', None):
+            return
+        try:
+            an = int(self.vars['auto_start'].get())
+        except (tk.TclError, ValueError, KeyError):
+            an = 0
+        if not an:
+            text, farbe = '', MUT
+        elif not (twse and plugin) or alt:
+            text, farbe = tr('Der Autostart braucht das Plugin ab Version 1.3.0: rechts "Installieren" bzw. "Aktualisieren" klicken.'), ERR
+        else:
+            status = self.status_lesen().get('autostart', '')
+            teile = status.split(',') if status else []
+            letzte = teile[2] if len(teile) == 3 else ''
+            text = {'1': tr('Beim letzten Spielstart wurde das Tool geöffnet.'),
+                    '2': tr('Beim letzten Spielstart lief das Tool schon.'),
+                    '-1': tr('Beim letzten Spielstart ging der Autostart schief - siehe Plugin-Log.')}.get(
+                letzte, tr('Wirkt ab dem nächsten Spielstart über TwoWorldsExtended.exe.'))
+            farbe = ERR if letzte == '-1' else MUT
+        self.auto_hinweis.configure(text=text, foreground=farbe)
 
     def status_lesen(self):
         try:
@@ -848,9 +1013,26 @@ class App(tk.Tk):
         except OSError as e:
             self.melden(tr('Log leeren fehlgeschlagen: {fehler}').format(fehler=e), 'err')
 
+    def _spiel_beendet(self):
+        self._spiel_zu = True                 # aus dem Warte-Thread: nur das Flag
+
     def _tick(self):
         if not self.winfo_exists():
             return
+        if self._spiel_zu:
+            self._spiel_zu = False
+            self.spiel_pid = None
+            if self.werte.get('auto_close', 1):
+                self.beenden()
+                return
+            self.melden(tr('Das Spiel wurde beendet.'))
+        if self._fb_wartet:
+            try:
+                if self.state() == 'normal':
+                    self._fb_wartet = False
+                    self.fb.start()
+            except tk.TclError:
+                pass
         try:
             self.aktualisiere_status()
             self._exp_labels()
@@ -944,6 +1126,7 @@ class Guide(tk.Toplevel):
             (tr('Pferd'), tr('"Pferd unsterblich" schützt das zuletzt gerittene Pferd. Die Pfeifreichweite gilt nur, wenn ihr Schalter an ist; sonst bleibt der Wert aus der Exe.'), 'box_horse'),
             (tr('Lava'), tr('Lava zieht jedes Bild 5 % der Lebenspunkte ab. Der erste Regler ändert die Prozent, der zweite, wie oft ein Tick kommt. Beides zusammen bestimmt, wie lange man in Lava überlebt.'), 'box_lava'),
             (tr('Diagnose'), tr('Das Protokoll schreibt jeden Lebenspunkt-Verlust des Helden mit Aufrufer in TWExtended.log. Nur zum Suchen nach weiteren Schadensquellen nötig, sonst aus lassen.'), 'box_diag'),
+            (tr('Autostart'), tr('Auf Wunsch öffnet das Plugin dieses Tool bei jedem Spielstart, minimiert, damit das Spiel im Vordergrund bleibt. Beim Beenden des Spiels schließt es sich wieder.'), 'box_auto'),
             (tr('Anwenden'), tr('Jede Änderung wird nach einer Sekunde automatisch gespeichert. Der Knopf "Anwenden" (Strg+S) macht es sofort. "Originalwerte" stellt das Spiel zurück.'), 'btn_anwenden'),
             (tr('Fertig'), tr('Das Spiel muss über TwoWorldsExtended.exe (TWSE) starten, sonst lädt kein Plugin; der Knopf "Spiel starten" tut genau das. Diesen Guide gibt es jederzeit unter Hilfe > Guide starten oder mit F1.'), None),
         ]
@@ -1036,6 +1219,7 @@ KURZANLEITUNG = """tw1_Extendet-settings - Kurzanleitung
 6. Pferd: "Pferd unsterblich" fängt jeden Schaden am zuletzt gerittenen Pferd ab und hält seine Lebenspunkte voll. Die Pfeifreichweite (Original 40 m) sitzt als Zahl in der Exe; das Plugin setzt sie im Speicher, wenn der Schalter an ist, sonst bleibt der Exe-Wert. Gerufen wird nur das zuletzt gerittene Pferd, und nur wenn es noch geladen ist.
 7. Lava: Wer in Lava schwimmt, verliert jedes Bild 5 % der maximalen Lebenspunkte. Prozent und Takt (alle n Bilder) sind einstellbar, der Schalter nimmt den Schaden ganz weg.
 8. Konsole im Spiel: twext.reload liest die Datei neu, twext.status zeigt die Werte, twext.log 1 schaltet das Protokoll ein.
+9. Autostart: Ist "Beim Spielstart öffnen" an, startet das Plugin dieses Tool zusammen mit dem Spiel, auf Wunsch minimiert und ohne dem Spiel den Fokus zu nehmen, und schließt es mit dem Spiel wieder. Das Tool trägt seinen eigenen Pfad in die Datei ein. Es läuft nie doppelt.
 
 Originalwerte: Fall an, 100 %, ab 8.0, tot ab 25.0, tödlich an; Rutschen an, 10 %, ab 30 Ticks; Lava an, 5 %, jedes Bild; Pferd sterblich, Pfeife 40 m.
 """
@@ -1043,6 +1227,27 @@ Originalwerte: Fall an, 100 %, ab 8.0, tot ab 25.0, tödlich an; Rutschen an, 10
 UEBER_TEXT = """Stellt Fall-, Rutsch- und Lavaschaden, Pferde-Unsterblichkeit und die Pfeifreichweite von Two Worlds 1 ein. Die Werte schreibt das Tool in eine Datei im Spielordner, das TWSE-Plugin TWExtended.dll wendet sie im laufenden Spiel an. Baut auf dem Two Worlds Script Extender (TWSE) von buglord auf und legt ihn selbst an; twse.dll und der Patch sind CC0. Lizenz CC0."""
 
 TEXTE_EN = {
+    'Autostart': 'Autostart',
+    'Beim Spielstart öffnen': 'Open when the game starts',
+    'Das Plugin öffnet dieses Tool, sobald das Spiel über TwoWorldsExtended.exe startet. So lassen sich die Werte mitten im Spiel ändern.':
+        'The plugin opens this tool as soon as the game starts via TwoWorldsExtended.exe, so values can be changed mid-game.',
+    'Minimiert starten, das Spiel behält den Fokus': 'Start minimized, the game keeps the focus',
+    'Empfohlen im Vollbild: Two Worlds kann sich minimieren, wenn ihm ein Fenster den Fokus nimmt. Mit zwei Monitoren den Haken herausnehmen.':
+        'Recommended in fullscreen: Two Worlds may minimize when a window takes its focus. With two monitors, untick it.',
+    'Mit dem Spiel schließen': 'Close with the game',
+    'Das Tool beendet sich, wenn das Spiel beendet wird. Gilt nur, wenn das Spiel es gestartet hat.':
+        'The tool quits when the game quits. Only when the game started it.',
+    'Der Autostart braucht das Plugin ab Version 1.3.0: rechts "Installieren" bzw. "Aktualisieren" klicken.':
+        'Autostart needs the plugin from version 1.3.0: click "Install" or "Update" on the right.',
+    'Beim letzten Spielstart wurde das Tool geöffnet.': 'At the last game start the tool was opened.',
+    'Beim letzten Spielstart lief das Tool schon.': 'At the last game start the tool was already running.',
+    'Beim letzten Spielstart ging der Autostart schief - siehe Plugin-Log.': 'At the last game start the autostart failed - see the plugin log.',
+    'Wirkt ab dem nächsten Spielstart über TwoWorldsExtended.exe.': 'Takes effect from the next game start via TwoWorldsExtended.exe.',
+    'Mit dem Spiel gestartet. Änderungen wirken sofort im laufenden Spiel.': 'Started with the game. Changes take effect right away in the running game.',
+    'Das Spiel wurde beendet.': 'The game has ended.',
+    'veraltet - "Aktualisieren" klicken': 'outdated - click "Update"',
+    'Auf Wunsch öffnet das Plugin dieses Tool bei jedem Spielstart, minimiert, damit das Spiel im Vordergrund bleibt. Beim Beenden des Spiels schließt es sich wieder.':
+        'If you like, the plugin opens this tool at every game start, minimized so the game stays in front. It closes again when the game ends.',
     'Datei': 'File', 'Ansicht': 'View', 'Hilfe': 'Help',
     'Anwenden': 'Apply', 'Originalwerte': 'Original values',
     'Spielordner wählen ...': 'Choose game folder ...', 'Spielordner öffnen': 'Open game folder',
@@ -1136,6 +1341,7 @@ TEXTE_EN = {
 6. Horse: "Horse immortal" drops all damage to the last ridden horse and keeps its hit points full. The whistle range (original 40 m) is a number inside the exe; the plugin sets it in memory while its switch is on, otherwise the exe value stays. Only the last ridden horse is called, and only while it is still loaded.
 7. Lava: Swimming in lava costs 5 % of max hit points every frame. Percent and rate (every n frames) are adjustable; the switch removes the damage entirely.
 8. In-game console: twext.reload re-reads the file, twext.status shows the values, twext.log 1 turns on the log.
+9. Autostart: With "Open when the game starts" on, the plugin starts this tool together with the game, minimized if you like and without taking the focus from the game, and closes it with the game. The tool writes its own path into the file. It never runs twice.
 
 Original values: fall on, 100 %, from 8.0, death from 25.0, lethal on; slide on, 10 %, from 30 ticks; lava on, 5 %, every frame; horse mortal, whistle 40 m.
 """,
@@ -1144,14 +1350,21 @@ Original values: fall on, 100 %, from 8.0, death from 25.0, lethal on; slide on,
 
 
 def main():
-    global SPRACHE
+    global SPRACHE, _SPERRE
+    pid, mini = argumente(sys.argv[1:])
+    _SPERRE = einzige_instanz()
+    if _SPERRE is None:
+        if pid is None:
+            fenster_nach_vorn()          # von Hand gestartet: das offene Fenster zeigen
+        return
     konfig = Konfig()
     while True:
         SPRACHE = os.environ.get('TWEXT_LANG') or konfig.get('lang') or systemsprache()
-        app = App(konfig)
+        app = App(konfig, spiel_pid=pid, minimiert=mini)
         app.mainloop()
         if not app.restart:
             break
+        mini = False                     # nach DE/EN-Wechsel normal zeigen
 
 
 if __name__ == '__main__':
