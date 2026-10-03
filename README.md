@@ -1,7 +1,7 @@
 # tw1_Extendet-settings
 
-Adjustable damage for **Two Worlds 1 (v1.7)**: fall, slide and lava damage,
-an immortal horse and the whistle range, live while the game runs. The tool
+Adjustable damage for **Two Worlds 1 (v1.7)**: fall, slide, lava and poison
+damage, an immortal horse and the whistle range, live while the game runs. The tool
 can open itself with the game. Two parts:
 
 - `TWExtended.dll` - a plugin for buglord's
@@ -23,12 +23,21 @@ Run anyway".
 
 ## Install
 
-1. Start `tw1_Extendet-settings.exe` and click **Install (TWSE + plugin)**.
-   That creates `TwoWorldsExtended.exe` (a copy of `TwoWorlds.exe` with
-   buglord's TWSE loader, the 4 GB flag and the Win11 text-input fix, exactly
-   what his patcher does) plus `twse.dll`, and copies `TWExtended.dll` to
-   `<Game>\TWSEPlugins\`. `TwoWorlds.exe` itself is not modified. If TWSE is
-   already installed, only the plugin is copied or updated.
+1. Start `tw1_Extendet-settings.exe`. On the first start (since 1.4.0) it
+   finds the game folder and sets everything up by itself: it creates
+   `TwoWorldsExtended.exe` (a copy of `TwoWorlds.exe` with buglord's TWSE
+   loader, the 4 GB flag and the Win11 text-input fix, exactly what his
+   patcher does) plus `twse.dll`, and copies `TWExtended.dll` to
+   `<Game>\TWSEPlugins\`. `TwoWorlds.exe` itself is not modified. An outdated
+   plugin is replaced the same way on every start; an existing TWSE stays as
+   it is. While the game runs it
+   waits and installs as soon as the game is closed. **Install (TWSE +
+   plugin)** does the same by hand.
+   - Game under "Program Files" without write access: an error window offers
+     **Restart as administrator**; that is needed once.
+   - Unknown exe version (not 1.7): the error is shown once per tool version,
+     nothing is changed.
+   - Started by the game (autostart) the tool never installs anything.
 2. Start the game with **Start game** (or `TwoWorldsExtended.exe` directly);
    the plain exe loads no plugins.
 3. Move the sliders. Every change is written after a second; the running game
@@ -54,9 +63,10 @@ via `TwoWorldsExtended.exe` the plugin opens the tool together with the game:
 repository (CC0), same byte changes and the same DJB2 checks, so it refuses
 unknown exe versions.
 
-The game folder comes from the registry
-(`HKLM\SOFTWARE\WOW6432Node\Reality Pump\TwoWorlds\FileSystem\DataPath`);
-File > Choose game folder overrides it.
+The game folder: the one chosen under File > Choose game folder, else the
+registry (`HKLM\SOFTWARE\WOW6432Node\Reality Pump\TwoWorlds\FileSystem\DataPath`),
+else every Steam library (`libraryfolders.vdf`), else the usual Steam, GOG and
+retail folders. If none has a `TwoWorlds.exe`, the tool asks once.
 
 ## Help testing
 
@@ -65,10 +75,10 @@ tool lists them under **Help > Test untested features**: pick a test, follow
 the steps (the **Start** button launches `TwoWorldsExtended.exe` and notes
 what is visible from outside, like new crash reports), then click **Works**
 or **Does not work**. Two confirmations close a test for everyone; until then
-the lava and horse sections carry "(experimental)".
+the lava, poison and horse sections carry "(experimental)".
 
-Open tests: one-click install, fall damage off, lava damage, immortal horse,
-whistle range, autostart with the game.
+Open tests: one-click install, install on first start, fall damage off, lava
+damage, poison damage, immortal horse, whistle range, autostart with the game.
 
 **Help > Report a bug** and the **Report a bug** button in every error
 message send a report to alchemy-fox.de. You see exactly what is sent before
@@ -91,6 +101,8 @@ status.
 | Lava damage on | on | damage while swimming in lava |
 | Lava percent per tick | 5 | percent of max HP per damage tick |
 | Lava tick every n frames | 1 | original: every frame, so 5 % x 20 frames = dead in under a second |
+| Poison damage per tick | 100 % | scale of the damage per poison tick, all poisoned units, rounded down; 0 = none |
+| Poison tick interval | 31 | unit updates between poison ticks, 1..127; a countdown already running ends with the old value |
 | Horse immortal | off | the last ridden horse takes no damage, its HP stay full |
 | Whistle range | 40 m | distance the horse answers the whistle from; switch off = leave the exe value (a patched exe keeps its value) |
 | Log damage | off | log every HP loss of the hero with the caller address |
@@ -128,6 +140,18 @@ set, calls SetFallPercent(5) every frame (`push 5; mov ecx,esi; call eax` at
 replaces those six bytes with a call into a small thunk that applies the
 configured percent and rate. Found with the damage log: every lava hit had
 caller `0x585AF9`, inside the fall-damage routine.
+
+Poison is a countdown per unit: `0x4BEC80` adds to the poison pool
+(`[unit+0x148]`) and starts the countdown `[unit+0x144]` at 30 (`0x4BECD9`);
+the unit tick `0x4BED10` counts down, and at 0 asks the script callback
+`0x57D5A0` for the damage (it also drains the pool), deals it through the
+unit's damage slot `+0x158` with the poisoner as attacker, and reloads the
+countdown with `and eax, 0x1F; add eax, -1` (`0x4BED74`), so a tick every 31
+updates while poison is left. The plugin writes the interval into both
+immediates (the `and` takes a sign-extended byte, hence 1..127) and replaces
+the five bytes `push eax; mov ecx, edi; call edx` at `0x4BED5B` with a call
+into a thunk that scales the damage and then calls the original slot with the
+same stack, so pool, attacker and death handling stay the game's own.
 
 Horse: the plugin hooks the horse class's SubHP slot (`+0x138`) and drops any
 damage to the hero's last ridden horse (`EC_GetHorse`, fallback
@@ -172,6 +196,18 @@ German, with the first-start guide:
 ![Guide](docs/tool_de_guide.png)
 
 ## Changelog
+
+### 1.4.0 (04.10.2026)
+
+- **Sets itself up:** on a normal start the tool finds the game (registry,
+  Steam libraries, usual folders) and installs TWSE and the plugin when one is
+  missing or the plugin is outdated - no click needed. While the game runs it
+  waits until the game is closed. Missing write access offers a restart as
+  administrator; errors show once per version, the button always works.
+- **Poison damage (experimental):** damage per poison tick in percent and the
+  tick interval, for all poisoned units; section `[PoisonDamage]` in the ini.
+- Plugin revision 5 (poison hook, status lines `poison_hook`, `poison_applied`,
+  `poison`).
 
 ### 1.3.1 (23.09.2026)
 

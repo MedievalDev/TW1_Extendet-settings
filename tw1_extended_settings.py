@@ -6,6 +6,7 @@ laufenden Spiel. Design nach PY_TOOL_DESIGN.md (Dark Theme, theme.py).
 Deutsche Texte sind die Quelle (tr), englische Tabelle am Dateiende.
 """
 import ctypes
+import re
 import datetime
 import traceback
 import json
@@ -46,7 +47,7 @@ KONFIG_DATEI = os.path.join(DATEN, 'tw1_extended_settings.json')
 ICON = os.path.join(RES, 'tw1_extended.ico')
 UNTESTED = os.path.join(RES, 'untested.json')
 FEEDBACK_SLUG = 'extendedsettings'
-VERSION = '1.3.1'
+VERSION = '1.4.0'
 
 # Originalwerte des Spiels (TwoWorlds.exe 1.7), siehe tw_extended.c
 STANDARD = {
@@ -54,6 +55,7 @@ STANDARD = {
     'fall_lethal': 1,
     'slide_enabled': 1, 'slide_percent': 10, 'slide_grace': 30,
     'lava_enabled': 1, 'lava_percent': 5, 'lava_every': 1,
+    'poison_percent': 100, 'poison_interval': 31,
     'horse_immortal': 0, 'whistle_set': 0, 'whistle_m': 40,
     'log_damage': 0,
     'auto_start': 0, 'auto_min': 1, 'auto_close': 1,
@@ -73,6 +75,8 @@ INI_KEYS = (  # (Sektion, Schluessel, unser Name, Typ)
     ('LavaDamage', 'Enabled', 'lava_enabled', int),
     ('LavaDamage', 'Percent', 'lava_percent', int),
     ('LavaDamage', 'EveryFrames', 'lava_every', int),
+    ('PoisonDamage', 'Percent', 'poison_percent', int),
+    ('PoisonDamage', 'TickInterval', 'poison_interval', int),
     ('Horse', 'Immortal', 'horse_immortal', int),
     ('Horse', 'WhistleRangeMeters', 'whistle_ini', int),
     ('Diagnose', 'LogDamage', 'log_damage', int),
@@ -136,6 +140,54 @@ def spielpfad_registry():
         return ''
 
 
+def _steam_bibliotheken():
+    """Steam-Ordner aus der Registry und alle Bibliotheken aus libraryfolders.vdf."""
+    wurzeln = []
+    try:
+        import winreg
+        for hive, key in ((winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\WOW6432Node\Valve\Steam'),
+                          (winreg.HKEY_CURRENT_USER, r'SOFTWARE\Valve\Steam')):
+            try:
+                with winreg.OpenKey(hive, key) as k:
+                    for name in ('InstallPath', 'SteamPath'):
+                        try:
+                            wurzeln.append(winreg.QueryValueEx(k, name)[0].replace('/', os.sep))
+                        except OSError:
+                            pass
+            except OSError:
+                pass
+    except ImportError:
+        pass
+    aus = []
+    for w in wurzeln:
+        aus.append(w)
+        vdf = os.path.join(w, 'steamapps', 'libraryfolders.vdf')
+        try:
+            with open(vdf, encoding='utf-8', errors='ignore') as f:
+                text = f.read()
+        except OSError:
+            continue
+        for m in re.finditer(r'"path"\s+"([^"]+)"', text):
+            aus.append(m.group(1).replace('\\\\', '\\'))
+    return aus
+
+
+def spielordner_finden(konfig_pfad=''):
+    """Spielordner: gemerkt, Registry (DataPath), Steam-Bibliotheken, uebliche Orte."""
+    def kandidaten():
+        yield konfig_pfad
+        yield spielpfad_registry()
+        for lib in _steam_bibliotheken():
+            yield os.path.join(lib, 'steamapps', 'common', 'Two Worlds - Epic Edition')
+        yield r'C:\Program Files (x86)\Steam\steamapps\common\Two Worlds - Epic Edition'
+        yield r'C:\GOG Games\Two Worlds Epic Edition'
+        yield r'C:\Program Files (x86)\Reality Pump\Two Worlds'
+    for k in kandidaten():
+        if k and os.path.isfile(os.path.join(k, 'TwoWorlds.exe')):
+            return os.path.normpath(k)
+    return ''
+
+
 def ini_lesen(pfad):
     """Sehr kleiner INI-Leser, gleiche Regeln wie das Plugin."""
     werte = dict(STANDARD)
@@ -161,6 +213,8 @@ def ini_lesen(pfad):
                     werte[name] = typ(float(v)) if typ is int else typ(v)
                 except ValueError:
                     pass
+    werte['poison_percent'] = max(0, min(1000, werte['poison_percent']))
+    werte['poison_interval'] = max(1, min(127, werte['poison_interval']))
     m = werte.pop('whistle_ini', 0)
     if m > 0:
         werte['whistle_set'], werte['whistle_m'] = 1, m
@@ -197,6 +251,9 @@ def ini_schreiben(pfad, w):
         f'Enabled={int(w["lava_enabled"])}        ; damage while swimming in lava\n'
         f'Percent={int(w["lava_percent"])}        ; percent of max HP per damage tick (original 5)\n'
         f'EveryFrames={int(w["lava_every"])}    ; a damage tick every n frames (original 1 = every frame)\n'
+        '\n[PoisonDamage]\n'
+        f'Percent={max(0, min(1000, int(w["poison_percent"])))}      ; damage per tick, 100 = original; all poisoned units\n'
+        f'TickInterval={max(1, min(127, int(w["poison_interval"])))}  ; unit updates between ticks, lower = faster\n'
         '\n[Horse]\n'
         f'Immortal={int(w["horse_immortal"])}       ; 1 = the hero\'s horse takes no damage\n'
         f'WhistleRangeMeters={int(w["whistle_m"]) if w["whistle_set"] else 0} ; distance the horse answers the whistle from (original 40), 0 = leave the exe as it is\n'
@@ -353,7 +410,7 @@ class App(tk.Tk):
         self.konfig = konfig
         self.restart = False
         self.lang = SPRACHE
-        self.spiel = konfig.get('game_dir') or spielpfad_registry()
+        self.spiel = spielordner_finden(konfig.get('game_dir', ''))
         self.werte = dict(STANDARD)
         self.vars = {}
         self._speicher_job = None
@@ -362,6 +419,7 @@ class App(tk.Tk):
         self.spiel_pid = spiel_pid           # vom Plugin gestartet: PID des Spiels
         self._spiel_zu = False               # setzt der Warte-Thread, _tick reagiert
         self._fb_wartet = False
+        self._auto_wartet = False            # Installation wartet, bis das Spiel zu ist
         theme.apply_dark_theme(self)
         self.title(f'{TOOL_NAME} {VERSION}')
         try:
@@ -401,9 +459,7 @@ class App(tk.Tk):
             self._fb_wartet = True
             self.melden(tr('Mit dem Spiel gestartet. Änderungen wirken sofort im laufenden Spiel.'), 'ok')
         else:
-            if not konfig.get('guide_seen'):
-                self.after(400, self.guide_starten)
-            self.after(1200, self.fb.start)
+            self.after(500, self._erster_ablauf)
 
     # ---------------------------------------------------------- Menueleiste
     def bau_menueleiste(self):
@@ -504,19 +560,33 @@ class App(tk.Tk):
         la.names.sort(key=lambda n: (n.lower() != TWSE_EXE.lower(), n.lower()))
         return la
 
+    def _erster_ablauf(self):
+        """Normaler Start: erst einrichten (kann den Ordnerdialog zeigen),
+        dann Rundgang und Testfenster."""
+        if not self.winfo_exists():
+            return
+        self.auto_installieren()
+        if not self.winfo_exists():
+            return
+        if not self.konfig.get('guide_seen'):
+            self.after(300, self.guide_starten)
+        self.after(1000, self.fb.start)
+
     def _exp_labels(self):
         """Bereiche mit ungetesteten Neuerungen tragen "(experimentell)",
         bis zwei Leute den Test bestaetigt haben."""
         for box, titel, label in ((self.box_lava, tr('Lavaschaden'), 'lava'),
+                                  (self.box_poison, tr('Giftschaden'), 'poison'),
                                   (self.box_horse, tr('Pferd'), 'horse')):
             if self.fb.experimental(label):
                 titel += '  ' + tr('(experimentell)')
             if box.cget('text') != titel:
                 box.configure(text=titel)
 
-    def fehler(self, text, key, fp_en):
+    def fehler(self, text, key, fp_en, extra=None):
         """Fehlerdialog mit "Bug melden". ``key`` und ``fp_en`` sind feste
-        englische Texte ohne Nutzerdaten (oeffentlicher Titel)."""
+        englische Texte ohne Nutzerdaten (oeffentlicher Titel). ``extra`` =
+        (Beschriftung, Befehl) fuer einen zusaetzlichen Knopf."""
         self.fb.log.add('error ' + key)
         dlg = tk.Toplevel(self)
         dlg.title(TOOL_NAME)
@@ -531,6 +601,8 @@ class App(tk.Tk):
             parent=dlg, error_text=text, error_key=key,
             title=f'{key}: {fp_en}', fp_text=fp_en)).pack(side='left')
         ttk.Button(reihe, text=tr('Schließen'), style='Accent.TButton', command=dlg.destroy).pack(side='right')
+        if extra:
+            ttk.Button(reihe, text=extra[0], command=lambda: (dlg.destroy(), extra[1]())).pack(side='right', padx=(0, 6))
         theme.dark_titlebar(dlg)
         dlg.grab_set()
         return dlg
@@ -631,6 +703,19 @@ class App(tk.Tk):
                     tr('Original 5. Auch hier rechnet das Spiel in Prozent der maximalen Lebenspunkte.'))
         self.regler(self.box_lava, 'lava_every', tr('Ein Schadenstick alle n Bilder'), 1, 60, 1,
                     tr('Original 1 = jedes Bild, also bei 5 % nach 20 Bildern tot. 10 = nur jedes zehnte Bild.'))
+
+        # --- Poison
+        self.box_poison = ttk.LabelFrame(links, text=tr('Giftschaden'), padding=(10, 6))
+        self.box_poison.pack(fill='x', pady=(0, 8))
+        ttk.Label(self.box_poison, text=tr('Gilt für den Helden, für Gegner und für alle anderen vergifteten Figuren.'),
+                  style='Muted.TLabel', wraplength=500).pack(anchor='w', pady=(0, 4))
+        self.regler(self.box_poison, 'poison_percent', tr('Schaden je Gift-Tick in Prozent des Originals'), 0, 1000, 1,
+                    tr('100 = Original, 200 = doppelt, 0 = kein Giftschaden. Abgerundet auf ganze Lebenspunkte.'))
+        self.regler(self.box_poison, 'poison_interval', tr('Abstand der Gift-Ticks (Spielschritte)'), 1, 127, 1,
+                    tr('Original 31. Kleiner = häufiger Schaden. Ein laufender Countdown läuft noch mit dem alten Abstand zu Ende.'))
+        self.poison_hinweis = ttk.Label(self.box_poison, text='', style='Muted.TLabel',
+                                       wraplength=500, justify='left')
+        self.poison_hinweis.pack(anchor='w', pady=(0, 2))
 
         # --- Diagnose
         self.box_diag = ttk.LabelFrame(links, text=tr('Diagnose'), padding=(10, 6))
@@ -785,6 +870,8 @@ class App(tk.Tk):
         w['slide_grace'] = max(0, min(127, int(w['slide_grace'])))
         w['lava_percent'] = max(0, min(100, int(w['lava_percent'])))
         w['lava_every'] = max(1, min(600, int(w['lava_every'])))
+        w['poison_percent'] = max(0, min(1000, int(w['poison_percent'])))
+        w['poison_interval'] = max(1, min(127, int(w['poison_interval'])))
         w['fall_min'] = max(0.0, float(w['fall_min']))
         w['fall_death'] = max(0.0, float(w['fall_death']))
         return w
@@ -833,9 +920,11 @@ class App(tk.Tk):
             return
         self.spiel = pfad
         self.konfig['game_dir'] = pfad
+        self.konfig.pop('auto_install_failed', None)
         self.konfig.save()
         self.laden()
         self.aktualisiere_status()
+        self.after(200, self.auto_installieren)
 
     def spielordner_oeffnen(self):
         if self.spiel and os.path.isdir(self.spiel):
@@ -869,39 +958,124 @@ class App(tk.Tk):
         except OSError as e:
             self.fehler(tr('Start fehlgeschlagen: {fehler}').format(fehler=e), 'game.start_failed', 'Starting TwoWorldsExtended.exe failed')
 
-    def plugin_installieren(self):
+    def installieren_kern(self, twse_auffrischen=True):
+        """Legt TWSE an und kopiert das Plugin, ohne Dialoge. Ohne
+        ``twse_auffrischen`` (Automatik) bleibt ein vorhandenes TWSE unberuehrt.
+        Rueckgabe (ergebnis, dateien, text): ergebnis 'ok', 'laeuft', 'kein_ordner',
+        'kein_plugin', 'rechte', 'version' oder 'fehler'."""
         if not self.spiel:
-            self.melden(tr('Spielordner nicht gefunden. Datei > Spielordner wählen.'), 'err')
-            return
+            return 'kein_ordner', [], ''
         quelle = self.plugin_quelle()
         if not quelle:
-            self.fehler(tr('TWExtended.dll liegt nicht neben dem Tool.'), 'install.no_plugin', 'Plugin DLL missing next to the tool')
-            return
+            return 'kein_plugin', [], ''
         if prozess_laeuft((TWSE_EXE, 'TwoWorlds.exe')):
-            messagebox.showwarning(TOOL_NAME, tr('Bitte das Spiel beenden, dann das Plugin installieren.'))
-            return
+            return 'laeuft', [], ''
         getan = []
         twse_dll = self.twse_quelle()
-        if twse_dll:
-            try:
-                getan += twse_patch.installieren(self.spiel, twse_dll)
-            except (OSError, ValueError) as e:
-                self.fehler(tr('TWSE anlegen fehlgeschlagen: {fehler}').format(fehler=e), 'install.twse_failed', 'Creating TWSE failed')
-                return
-        ziel_ordner = os.path.join(self.spiel, 'TWSEPlugins')
         try:
+            if twse_dll and (twse_auffrischen or not self.twse_da()):
+                getan += twse_patch.installieren(self.spiel, twse_dll)
+            ziel_ordner = os.path.join(self.spiel, 'TWSEPlugins')
             os.makedirs(ziel_ordner, exist_ok=True)
             shutil.copy2(quelle, os.path.join(ziel_ordner, PLUGIN_DLL))
             getan.append('TWSEPlugins\\' + PLUGIN_DLL)
+        except PermissionError as e:
+            return 'rechte', getan, str(e)
+        except ValueError as e:
+            return 'version', getan, str(e)
         except OSError as e:
-            self.fehler(tr('Kopieren fehlgeschlagen: {fehler}').format(fehler=e), 'install.copy_failed', 'Copying the plugin failed')
-            return
-        if not self.twse_da():
-            messagebox.showinfo(TOOL_NAME, tr('Plugin kopiert, aber TWSE fehlt (twse.dll liegt nicht neben dem Tool). TWSE-Patcher von buglord auf TwoWorlds.exe anwenden, danach über TwoWorldsExtended.exe starten.'))
-        else:
-            self.fb.log.add('install ok')
-            self.melden(tr('Installiert: {dateien}. Spiel mit "Spiel starten" oder über TwoWorldsExtended.exe starten.').format(dateien=', '.join(getan)), 'ok')
+            if getattr(e, 'winerror', None) == 5 or getattr(e, 'errno', None) == 13:
+                return 'rechte', getan, str(e)
+            return 'fehler', getan, str(e)
+        return 'ok', getan, ''
+
+    def installation_noetig(self):
+        if not self.spiel:
+            return False
+        plugin = os.path.exists(os.path.join(self.spiel, 'TWSEPlugins', PLUGIN_DLL))
+        return not self.twse_da() or not plugin or self.plugin_veraltet()
+
+    def _ergebnis_melden(self, ergebnis, getan, text, automatisch):
+        if ergebnis == 'ok':
+            self.fb.log.add('install ok' + (' (auto)' if automatisch else ''))
+            self.anwenden()                       # ini mit ToolPath und allen Abschnitten
+            if getan:
+                self.melden(tr('Installiert: {dateien}. Spiel mit "Spiel starten" oder über TwoWorldsExtended.exe starten.').format(
+                    dateien=', '.join(getan)), 'ok')
+            if not self.twse_da():
+                messagebox.showinfo(TOOL_NAME, tr('Plugin kopiert, aber TWSE fehlt (twse.dll liegt nicht neben dem Tool). TWSE-Patcher von buglord auf TwoWorlds.exe anwenden, danach über TwoWorldsExtended.exe starten.'))
+        elif ergebnis == 'kein_ordner':
+            self.melden(tr('Spielordner nicht gefunden. Datei > Spielordner wählen.'), 'err')
+        elif ergebnis == 'kein_plugin':
+            self.fehler(tr('TWExtended.dll liegt nicht neben dem Tool.'), 'install.no_plugin', 'Plugin DLL missing next to the tool')
+        elif ergebnis == 'rechte':
+            self.fehler(tr('Keine Schreibrechte im Spielordner: {fehler}\n\nLiegt das Spiel unter "Programme", braucht das Einrichten einmal Administratorrechte. Danach läuft das Tool wieder normal.').format(fehler=text),
+                        'install.no_rights', 'No write access to the game folder',
+                        extra=(tr('Als Administrator neu starten'), self.als_admin_neu_starten))
+        elif ergebnis == 'version':
+            self.fehler(tr('TWSE anlegen fehlgeschlagen: {fehler}').format(fehler=text), 'install.twse_failed', 'Creating TWSE failed')
+        elif ergebnis == 'fehler':
+            self.fehler(tr('Kopieren fehlgeschlagen: {fehler}').format(fehler=text), 'install.copy_failed', 'Copying the plugin failed')
         self.aktualisiere_status()
+
+    def plugin_installieren(self):
+        """Knopf "Installieren": immer ausfuehren, mit Rueckfragen."""
+        if prozess_laeuft((TWSE_EXE, 'TwoWorlds.exe')):
+            messagebox.showwarning(TOOL_NAME, tr('Bitte das Spiel beenden, dann das Plugin installieren.'))
+            return
+        ergebnis, getan, text = self.installieren_kern()
+        self._ergebnis_melden(ergebnis, getan, text, automatisch=False)
+
+    def auto_installieren(self):
+        """Beim Start: fehlt TWSE oder das Plugin, oder ist es veraltet, alles
+        selbst einspielen. Laeuft das Spiel, wartet es (siehe _tick). Ein
+        Fehlschlag wird je Version nur einmal gezeigt; der Knopf geht immer."""
+        if self.spiel_pid or not self.winfo_exists():
+            return
+        if not self.spiel:
+            if self.konfig.get('auto_dir_asked') != VERSION:
+                self.konfig['auto_dir_asked'] = VERSION
+                self.konfig.save()
+                self.melden(tr('Spielordner nicht gefunden - bitte den Ordner von Two Worlds wählen.'), 'err')
+                self.spielordner_waehlen()
+            if not self.spiel:
+                return
+        if not self.installation_noetig():
+            self._auto_wartet = False
+            return
+        if self.konfig.get('auto_install_failed') == VERSION:
+            return
+        ergebnis, getan, text = self.installieren_kern(twse_auffrischen=False)
+        if ergebnis == 'laeuft':
+            if not self._auto_wartet:
+                self.melden(tr('Two Worlds läuft - das Tool richtet TWSE und das Plugin ein, sobald das Spiel geschlossen ist.'))
+            self._auto_wartet = True
+            return
+        self._auto_wartet = False
+        if ergebnis not in ('ok', 'kein_ordner'):
+            self.konfig['auto_install_failed'] = VERSION
+            self.konfig.save()
+        self._ergebnis_melden(ergebnis, getan, text, automatisch=True)
+
+    def als_admin_neu_starten(self):
+        """Mit UAC neu starten. Vorher die Sperre freigeben, sonst haelt die
+        neue Instanz uns fuer "laeuft schon" und beendet sich."""
+        global _SPERRE
+        programm, parameter = tool_befehl()
+        self.konfig.pop('auto_install_failed', None)
+        self.konfig.save()
+        try:
+            if _SPERRE not in (None, True):
+                ctypes.windll.kernel32.CloseHandle(ctypes.c_void_p(_SPERRE))
+            _SPERRE = None
+            r = ctypes.windll.shell32.ShellExecuteW(None, 'runas', programm, parameter or None, None, 1)
+        except Exception:
+            r = 0
+        if r > 32:
+            self.destroy()
+            return
+        _SPERRE = einzige_instanz()               # abgebrochen: wieder sperren
+        self.melden(tr('Neustart als Administrator abgebrochen.'), 'err')
 
     # ---------------------------------------------------------- Status / Log
     def aktualisiere_status(self):
@@ -923,6 +1097,19 @@ class App(tk.Tk):
         self._auto_hinweis(twse, plugin, alt)
         self.btn_plugin.configure(text=tr('Aktualisieren (TWSE + Plugin)') if (plugin and twse) else tr('Installieren (TWSE + Plugin)'))
         status = self.status_lesen()
+        if alt or not plugin:
+            poison_text = tr('Der Giftschaden braucht das Plugin ab Version 1.4.0: rechts "Installieren" bzw. "Aktualisieren" klicken.')
+            poison_color = ERR
+        elif status.get('poison_hook') == '0' or status.get('poison_applied') == '0':
+            poison_text = tr('Beim letzten Spielstart schlug der Gift-Patch fehl - siehe Plugin-Log.')
+            poison_color = ERR
+        elif status.get('poison_applied') == '1':
+            poison_text = tr('Zuletzt angewendet: {werte} (Schaden in %, Abstand).').format(werte=status.get('poison', '?'))
+            poison_color = MUT
+        else:
+            poison_text = tr('Wirkt ab dem nächsten Spielstart über TwoWorldsExtended.exe.')
+            poison_color = MUT
+        self.poison_hinweis.configure(text=poison_text, foreground=poison_color)
         if status:
             z['aktiv'].configure(text=tr('Plugin zuletzt aktiv: {zeit}').format(zeit=status.get('time', '?')), foreground=INK)
         else:
@@ -1026,6 +1213,9 @@ class App(tk.Tk):
                 self.beenden()
                 return
             self.melden(tr('Das Spiel wurde beendet.'))
+            self.after(500, self.auto_installieren)
+        if self._auto_wartet and not prozess_laeuft((TWSE_EXE, 'TwoWorlds.exe')):
+            self.auto_installieren()
         if self._fb_wartet:
             try:
                 if self.state() == 'normal':
@@ -1048,6 +1238,11 @@ class App(tk.Tk):
                 except tk.TclError:
                     pass
         self._tick_job = self._speicher_job = None
+        try:                                  # auch die einmaligen after-Aufrufe (Start, Guide, Testfenster)
+            for job in self.tk.splitlist(self.tk.call('after', 'info')):
+                self.after_cancel(job)
+        except tk.TclError:
+            pass
         super().destroy()
 
     # ---------------------------------------------------------- Hilfe
@@ -1120,11 +1315,12 @@ class Guide(tk.Toplevel):
         self.protocol('WM_DELETE_WINDOW', self.schliessen)
         self.schritte = [
             (tr('Willkommen'), tr('Dieses Tool stellt ein, wie viel Schaden Two Worlds 1 beim Fallen und Rutschen macht. Die Werte wirken sofort, auch während das Spiel läuft.'), None),
-            (tr('Status rechts'), tr('Hier siehst du den Spielordner, ob TWSE und das Plugin da sind und wann das Plugin zuletzt gelaufen ist. Fehlt etwas, klicke "Installieren": das legt TwoWorldsExtended.exe und twse.dll an und kopiert das Plugin. TwoWorlds.exe bleibt unverändert.'), 'status_block'),
+            (tr('Status rechts'), tr('Hier siehst du den Spielordner, ob TWSE und das Plugin da sind und wann das Plugin zuletzt gelaufen ist. Fehlt etwas oder ist das Plugin veraltet, richtet das Tool es beim Start selbst ein: TwoWorldsExtended.exe, twse.dll und das Plugin. Der Knopf "Installieren" macht dasselbe von Hand. TwoWorlds.exe bleibt unverändert.'), 'status_block'),
             (tr('Fallschaden'), tr('Schalter aus = gar kein Fallschaden. Der Regler skaliert den Originalschaden: 50 ist die Hälfte, 0 ist nichts. Darunter die Höhen, ab denen Schaden und Sturztod beginnen.'), 'box_fall'),
             (tr('Rutschschaden'), tr('Beim Hinunterrutschen steiler Hänge zieht das Spiel alle paar Ticks Prozent der Lebenspunkte ab. Prozent und Anlaufzeit lassen sich hier setzen.'), 'box_slide'),
             (tr('Pferd'), tr('"Pferd unsterblich" schützt das zuletzt gerittene Pferd. Die Pfeifreichweite gilt nur, wenn ihr Schalter an ist; sonst bleibt der Wert aus der Exe.'), 'box_horse'),
             (tr('Lava'), tr('Lava zieht jedes Bild 5 % der Lebenspunkte ab. Der erste Regler ändert die Prozent, der zweite, wie oft ein Tick kommt. Beides zusammen bestimmt, wie lange man in Lava überlebt.'), 'box_lava'),
+            (tr('Giftschaden'), tr('Gift zieht im Original alle 31 Spielschritte Lebenspunkte ab, bei allen vergifteten Figuren. Der erste Regler skaliert den Schaden je Tick, der zweite den Abstand.'), 'box_poison'),
             (tr('Diagnose'), tr('Das Protokoll schreibt jeden Lebenspunkt-Verlust des Helden mit Aufrufer in TWExtended.log. Nur zum Suchen nach weiteren Schadensquellen nötig, sonst aus lassen.'), 'box_diag'),
             (tr('Autostart'), tr('Auf Wunsch öffnet das Plugin dieses Tool bei jedem Spielstart, minimiert, damit das Spiel im Vordergrund bleibt. Beim Beenden des Spiels schließt es sich wieder.'), 'box_auto'),
             (tr('Anwenden'), tr('Jede Änderung wird nach einer Sekunde automatisch gespeichert. Der Knopf "Anwenden" (Strg+S) macht es sofort. "Originalwerte" stellt das Spiel zurück.'), 'btn_anwenden'),
@@ -1211,7 +1407,7 @@ class Guide(tk.Toplevel):
 
 KURZANLEITUNG = """tw1_Extendet-settings - Kurzanleitung
 
-1. Voraussetzung: Two Worlds 1 (1.7). Der Knopf "Installieren" legt TwoWorldsExtended.exe (Kopie von TwoWorlds.exe mit dem TWSE-Lader von buglord, plus 4-GB-Flag und Win11-Texteingabe-Fix) und twse.dll an. TwoWorlds.exe selbst wird nicht angefasst.
+1. Voraussetzung: Two Worlds 1 (1.7). Beim ersten Start sucht das Tool den Spielordner (Registry, Steam-Bibliotheken) und legt selbst TwoWorldsExtended.exe (Kopie von TwoWorlds.exe mit dem TWSE-Lader von buglord, plus 4-GB-Flag und Win11-Texteingabe-Fix) und twse.dll an und kopiert das Plugin. Läuft das Spiel gerade, wartet es, bis es geschlossen ist. Ein veraltetes Plugin ersetzt es ebenso. TwoWorlds.exe selbst wird nicht angefasst; der Knopf "Installieren" macht dasselbe von Hand.
 2. Plugin: Derselbe Knopf kopiert TWExtended.dll nach <Spiel>\\TWSEPlugins\\. Das Spiel immer über TwoWorldsExtended.exe starten, zum Beispiel mit "Spiel starten".
 3. Werte: Jede Änderung landet nach einer Sekunde in <Spiel>\\tw1_Extendet-settings.ini. Das Plugin prüft die Datei jede Sekunde und übernimmt sie sofort, auch mitten im Spiel.
 4. Fallschaden: Das Spiel rechnet Schaden in Prozent der maximalen Lebenspunkte: (Höhe - 8) * 5,9 %. Ab Höhe 25 ist der Held sofort tot, ebenso wenn der Schaden zum Töten reicht. Alle vier Größen sind hier einstellbar, der Schalter nimmt alles weg.
@@ -1220,13 +1416,29 @@ KURZANLEITUNG = """tw1_Extendet-settings - Kurzanleitung
 7. Lava: Wer in Lava schwimmt, verliert jedes Bild 5 % der maximalen Lebenspunkte. Prozent und Takt (alle n Bilder) sind einstellbar, der Schalter nimmt den Schaden ganz weg.
 8. Konsole im Spiel: twext.reload liest die Datei neu, twext.status zeigt die Werte, twext.log 1 schaltet das Protokoll ein.
 9. Autostart: Ist "Beim Spielstart öffnen" an, startet das Plugin dieses Tool zusammen mit dem Spiel, auf Wunsch minimiert und ohne dem Spiel den Fokus zu nehmen, und schließt es mit dem Spiel wieder. Das Tool trägt seinen eigenen Pfad in die Datei ein. Es läuft nie doppelt.
+10. Gift: Vergiftete Figuren verlieren im Original alle 31 Spielschritte Lebenspunkte. Schaden je Tick (Prozent, abgerundet auf ganze Punkte) und der Abstand sind einstellbar und gelten für alle Figuren. Ein Countdown, der schon läuft, endet noch mit dem alten Abstand.
 
-Originalwerte: Fall an, 100 %, ab 8.0, tot ab 25.0, tödlich an; Rutschen an, 10 %, ab 30 Ticks; Lava an, 5 %, jedes Bild; Pferd sterblich, Pfeife 40 m.
+Originalwerte: Fall an, 100 %, ab 8.0, tot ab 25.0, tödlich an; Rutschen an, 10 %, ab 30 Ticks; Lava an, 5 %, jedes Bild; Gift 100 %, alle 31 Spielschritte; Pferd sterblich, Pfeife 40 m.
 """
 
-UEBER_TEXT = """Stellt Fall-, Rutsch- und Lavaschaden, Pferde-Unsterblichkeit und die Pfeifreichweite von Two Worlds 1 ein. Die Werte schreibt das Tool in eine Datei im Spielordner, das TWSE-Plugin TWExtended.dll wendet sie im laufenden Spiel an. Baut auf dem Two Worlds Script Extender (TWSE) von buglord auf und legt ihn selbst an; twse.dll und der Patch sind CC0. Lizenz CC0."""
+UEBER_TEXT = """Stellt Fall-, Rutsch-, Lava- und Giftschaden, Pferde-Unsterblichkeit und die Pfeifreichweite von Two Worlds 1 ein. Die Werte schreibt das Tool in eine Datei im Spielordner, das TWSE-Plugin TWExtended.dll wendet sie im laufenden Spiel an. Baut auf dem Two Worlds Script Extender (TWSE) von buglord auf und legt ihn selbst an; twse.dll und der Patch sind CC0. Lizenz CC0."""
 
 TEXTE_EN = {
+    'Giftschaden': 'Poison damage',
+    'Gilt für den Helden, für Gegner und für alle anderen vergifteten Figuren.': 'Applies to the hero, to enemies and to every other poisoned unit.',
+    'Schaden je Gift-Tick in Prozent des Originals': 'Damage per poison tick in percent of the original',
+    '100 = Original, 200 = doppelt, 0 = kein Giftschaden. Abgerundet auf ganze Lebenspunkte.': '100 = original, 200 = double, 0 = no poison damage. Rounded down to whole hit points.',
+    'Abstand der Gift-Ticks (Spielschritte)': 'Interval of the poison ticks (game steps)',
+    'Original 31. Kleiner = häufiger Schaden. Ein laufender Countdown läuft noch mit dem alten Abstand zu Ende.': 'Original 31. Lower = more frequent damage. A countdown already running finishes with the old interval.',
+    'Der Giftschaden braucht das Plugin ab Version 1.4.0: rechts "Installieren" bzw. "Aktualisieren" klicken.': 'Poison damage needs the plugin from version 1.4.0: click "Install" or "Update" on the right.',
+    'Beim letzten Spielstart schlug der Gift-Patch fehl - siehe Plugin-Log.': 'At the last game start the poison patch failed - see the plugin log.',
+    'Zuletzt angewendet: {werte} (Schaden in %, Abstand).': 'Last applied: {werte} (damage in %, interval).',
+    'Gift zieht im Original alle 31 Spielschritte Lebenspunkte ab, bei allen vergifteten Figuren. Der erste Regler skaliert den Schaden je Tick, der zweite den Abstand.': 'In the original, poison takes hit points every 31 game steps from every poisoned unit. The first slider scales the damage per tick, the second the interval.',
+    'Spielordner nicht gefunden - bitte den Ordner von Two Worlds wählen.': 'Game folder not found - please choose the Two Worlds folder.',
+    'Two Worlds läuft - das Tool richtet TWSE und das Plugin ein, sobald das Spiel geschlossen ist.': 'Two Worlds is running - the tool sets up TWSE and the plugin as soon as the game is closed.',
+    'Keine Schreibrechte im Spielordner: {fehler}\n\nLiegt das Spiel unter "Programme", braucht das Einrichten einmal Administratorrechte. Danach läuft das Tool wieder normal.': 'No write access to the game folder: {fehler}\n\nIf the game is under "Program Files", setting up needs administrator rights once. After that the tool runs normally again.',
+    'Als Administrator neu starten': 'Restart as administrator',
+    'Neustart als Administrator abgebrochen.': 'Restart as administrator cancelled.',
     'Autostart': 'Autostart',
     'Beim Spielstart öffnen': 'Open when the game starts',
     'Das Plugin öffnet dieses Tool, sobald das Spiel über TwoWorldsExtended.exe startet. So lassen sich die Werte mitten im Spiel ändern.':
@@ -1322,7 +1534,7 @@ TEXTE_EN = {
     'Guide': 'Guide', 'Willkommen': 'Welcome',
     'Dieses Tool stellt ein, wie viel Schaden Two Worlds 1 beim Fallen und Rutschen macht. Die Werte wirken sofort, auch während das Spiel läuft.': 'This tool sets how much damage Two Worlds 1 deals for falling and sliding. Values take effect immediately, even while the game is running.',
     'Status rechts': 'Status on the right',
-    'Hier siehst du den Spielordner, ob TWSE und das Plugin da sind und wann das Plugin zuletzt gelaufen ist. Fehlt etwas, klicke "Installieren": das legt TwoWorldsExtended.exe und twse.dll an und kopiert das Plugin. TwoWorlds.exe bleibt unverändert.': 'Here you see the game folder, whether TWSE and the plugin are present and when the plugin last ran. If something is missing, click "Install": it creates TwoWorldsExtended.exe and twse.dll and copies the plugin. TwoWorlds.exe stays untouched.',
+    'Hier siehst du den Spielordner, ob TWSE und das Plugin da sind und wann das Plugin zuletzt gelaufen ist. Fehlt etwas oder ist das Plugin veraltet, richtet das Tool es beim Start selbst ein: TwoWorldsExtended.exe, twse.dll und das Plugin. Der Knopf "Installieren" macht dasselbe von Hand. TwoWorlds.exe bleibt unverändert.': 'Here you see the game folder, whether TWSE and the plugin are present and when the plugin last ran. If something is missing or the plugin is outdated, the tool sets it up by itself at start: TwoWorldsExtended.exe, twse.dll and the plugin. The "Install" button does the same by hand. TwoWorlds.exe stays untouched.',
     'Schalter aus = gar kein Fallschaden. Der Regler skaliert den Originalschaden: 50 ist die Hälfte, 0 ist nichts. Darunter die Höhen, ab denen Schaden und Sturztod beginnen.': 'Switch off = no fall damage at all. The slider scales the original damage: 50 is half, 0 is nothing. Below are the heights where damage and fall death begin.',
     'Beim Hinunterrutschen steiler Hänge zieht das Spiel alle paar Ticks Prozent der Lebenspunkte ab. Prozent und Anlaufzeit lassen sich hier setzen.': 'While sliding down steep slopes the game takes a percentage of hit points every few ticks. Percent and grace time are set here.',
     'Lava': 'Lava',
@@ -1333,7 +1545,7 @@ TEXTE_EN = {
     'Schritt {n} von {m}': 'Step {n} of {m}',
     KURZANLEITUNG: """tw1_Extendet-settings - Quick guide
 
-1. Requirement: Two Worlds 1 (1.7). The "Install" button creates TwoWorldsExtended.exe (a copy of TwoWorlds.exe with buglord's TWSE loader, plus the 4 GB flag and the Win11 text input fix) and twse.dll. TwoWorlds.exe itself is not touched.
+1. Requirement: Two Worlds 1 (1.7). On the first start the tool finds the game folder (registry, Steam libraries), creates TwoWorldsExtended.exe (a copy of TwoWorlds.exe with buglord's TWSE loader, plus the 4 GB flag and the Win11 text input fix) and twse.dll and copies the plugin. If the game is running, it waits until it is closed. An outdated plugin is replaced the same way. TwoWorlds.exe itself is not touched; the "Install" button does the same by hand.
 2. Plugin: The same button copies TWExtended.dll to <Game>\\TWSEPlugins\\. Always start the game through TwoWorldsExtended.exe, for example with "Start game".
 3. Values: Every change lands in <Game>\\tw1_Extendet-settings.ini after a second. The plugin checks the file every second and applies it right away, even mid-game.
 4. Fall damage: The game computes damage in percent of max HP: (height - 8) * 5.9 %. From height 25 the hero dies instantly, likewise when the damage would kill. All four numbers are adjustable here; the switch removes everything.
@@ -1342,11 +1554,15 @@ TEXTE_EN = {
 7. Lava: Swimming in lava costs 5 % of max hit points every frame. Percent and rate (every n frames) are adjustable; the switch removes the damage entirely.
 8. In-game console: twext.reload re-reads the file, twext.status shows the values, twext.log 1 turns on the log.
 9. Autostart: With "Open when the game starts" on, the plugin starts this tool together with the game, minimized if you like and without taking the focus from the game, and closes it with the game. The tool writes its own path into the file. It never runs twice.
+10. Poison: In the original, poisoned units lose hit points every 31 game steps. Damage per tick (percent, rounded down to whole points) and the interval are adjustable and apply to all units. A countdown already running still ends with the old interval.
 
-Original values: fall on, 100 %, from 8.0, death from 25.0, lethal on; slide on, 10 %, from 30 ticks; lava on, 5 %, every frame; horse mortal, whistle 40 m.
+Original values: fall on, 100 %, from 8.0, death from 25.0, lethal on; slide on, 10 %, from 30 ticks; lava on, 5 %, every frame; poison 100 %, every 31 game steps; horse mortal, whistle 40 m.
 """,
-    UEBER_TEXT: """Adjusts fall, slide and lava damage, horse immortality and the whistle range of Two Worlds 1. The tool writes the values to a file in the game folder; the TWSE plugin TWExtended.dll applies them in the running game. Built on the Two Worlds Script Extender (TWSE) by buglord and installs it itself; twse.dll and the patch are CC0. License CC0.""",
+    UEBER_TEXT: """Adjusts fall, slide, lava and poison damage, horse immortality and the whistle range of Two Worlds 1. The tool writes the values to a file in the game folder; the TWSE plugin TWExtended.dll applies them in the running game. Built on the Two Worlds Script Extender (TWSE) by buglord and installs it itself; twse.dll and the patch are CC0. License CC0.""",
 }
+
+
+_SPERRE = None
 
 
 def main():

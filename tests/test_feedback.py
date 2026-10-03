@@ -21,7 +21,7 @@ import foxfeedback  # noqa: E402
 import foxfeedback_ui  # noqa: E402
 
 TOOL = 'extendedsettings'
-VERSION = '1.3.1'
+VERSION = '1.4.0'
 UNTESTED = os.path.join(ROOT, 'untested.json')
 
 

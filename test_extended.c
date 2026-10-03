@@ -57,8 +57,36 @@ int main(){
 	CHECK(cfg.horseImmortal == 1 && cfg.whistleMeters == 250);
 	CHECK(cfg.lavaEnabled == 0 && cfg.lavaPercent == 100 && cfg.lavaEvery == 7);
 	remove(INI_NAME);
+	/* Gift: Werte und Grenzen (Abstand 1..127 wegen des imm8 im Nachlade-AND) */
+	f = fopen(INI_NAME, "w");
+	fprintf(f, "[PoisonDamage]
+Percent=250
+TickInterval=12
+");
+	fclose(f);
+	defaults(&cfg); CHECK(readIni(&cfg) == 1 && cfg.poisonPercent == 250 && cfg.poisonInterval == 12);
+	f = fopen(INI_NAME, "w");
+	fprintf(f, "[PoisonDamage]
+Percent=5000
+TickInterval=200
+");
+	fclose(f);
+	defaults(&cfg); CHECK(readIni(&cfg) == 1 && cfg.poisonPercent == 1000 && cfg.poisonInterval == 127);
+	f = fopen(INI_NAME, "w");
+	fprintf(f, "[PoisonDamage]
+Percent=-3
+TickInterval=0
+");
+	fclose(f);
+	defaults(&cfg); CHECK(readIni(&cfg) == 1 && cfg.poisonPercent == 0 && cfg.poisonInterval == 1);
+	remove(INI_NAME);
+	/* Gift: Schaden je Tick skalieren, abgerundet */
+	defaults(&cfg); CHECK(scalePoisonDamage(15) == 15 && scalePoisonDamage(0) == 0 && scalePoisonDamage(-4) == -4);
+	cfg.poisonPercent = 50; CHECK(scalePoisonDamage(15) == 7);
+	cfg.poisonPercent = 0; CHECK(scalePoisonDamage(15) == 0);
+	cfg.poisonPercent = 1000; CHECK(scalePoisonDamage(15) == 150 && scalePoisonDamage(2147483647) == 2147483647);
 	/* Standarddatei schreiben und wieder lesen */
-	writeDefaultIni(); defaults(&cfg); cfg.fallPercent = 1; CHECK(readIni(&cfg) == 1 && cfg.fallPercent == 100 && cfg.slideGrace == 30 && cfg.whistleMeters == 0 && cfg.horseImmortal == 0 && cfg.lavaPercent == 5 && cfg.lavaEvery == 1);
+	writeDefaultIni(); defaults(&cfg); cfg.fallPercent = 1; CHECK(readIni(&cfg) == 1 && cfg.fallPercent == 100 && cfg.slideGrace == 30 && cfg.whistleMeters == 0 && cfg.horseImmortal == 0 && cfg.lavaPercent == 5 && cfg.lavaEvery == 1 && cfg.poisonPercent == 100 && cfg.poisonInterval == 31);
 	/* Lava-Tick: Prozent und Takt */
 	defaults(&cfg); cfg.lavaEvery = 3; cfg.lavaPercent = 9; reset_ctrl(0, 500, 500);
 	for(int i = 0; i < 6; i++) lavaTick(ctrl);

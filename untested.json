@@ -33,6 +33,37 @@
       }
     },
     {
+      "id": "install-on-first-start",
+      "since": "1.4.0",
+      "needs_run": false,
+      "title": {
+        "de": "Beim Start richtet das Tool alles selbst ein",
+        "en": "The tool sets everything up by itself at start"
+      },
+      "why": {
+        "de": "Neu in 1.4.0: Fehlen TWSE oder das Plugin oder ist das Plugin veraltet, spielt das Tool beides beim Öffnen ohne Klick ein. Geprüft nur mit einem Testordner.",
+        "en": "New in 1.4.0: if TWSE or the plugin is missing or the plugin is outdated, the tool installs both on opening, without a click. Checked only with a test folder."
+      },
+      "steps": {
+        "de": [
+          "Das Spiel geschlossen lassen.",
+          "Das Tool öffnen und nichts anklicken.",
+          "Unten in der Statuszeile die Meldung lesen und rechts im Status nachsehen.",
+          "Hattest du vorher schon eine ältere Version: Das Plugin muss danach als installiert gelten, nicht als veraltet."
+        ],
+        "en": [
+          "Keep the game closed.",
+          "Open the tool and do not click anything.",
+          "Read the message in the status bar at the bottom and check the status on the right.",
+          "If you had an older version before: the plugin must show as installed afterwards, not as outdated."
+        ]
+      },
+      "expect": {
+        "de": "Statuszeile grün mit \"Installiert: ...\", rechts TWSE und Plugin grün. Fehlen Schreibrechte, erscheint stattdessen ein Fenster mit \"Als Administrator neu starten\".",
+        "en": "Green status bar with \"Installed: ...\", TWSE and plugin green on the right. Without write access a window with \"Restart as administrator\" appears instead."
+      }
+    },
+    {
       "id": "fall-damage-off-ingame",
       "since": "1.0.0",
       "needs_run": true,
@@ -97,6 +128,40 @@
       "expect": {
         "de": "Mit 1 % alle 10 Bilder sinkt der Lebensbalken langsam statt in unter einer Sekunde. Mit dem Haken aus sinkt er gar nicht.",
         "en": "With 1 % every 10 frames the health bar drops slowly instead of in under a second. With the switch off it does not drop at all."
+      }
+    },
+    {
+      "id": "poison-damage-ingame",
+      "since": "1.4.0",
+      "needs_run": true,
+      "experimental": "poison",
+      "title": {
+        "de": "Giftschaden einstellbar",
+        "en": "Poison damage adjustable"
+      },
+      "why": {
+        "de": "Die Giftstelle ist aus der Exe abgeleitet und nur offline geprüft. Ob Schaden und Abstand im Spiel wirken, hat noch niemand gesehen.",
+        "en": "The poison spot is derived from the exe and only checked offline. Nobody has seen yet whether damage and interval work in the game."
+      },
+      "steps": {
+        "de": [
+          "Unter Giftschaden \"Schaden je Gift-Tick\" auf 0 stellen.",
+          "Das Spiel über \"Spiel starten\" öffnen und einen Spielstand laden.",
+          "Dich vergiften lassen und den Lebensbalken beobachten: er darf durch das Gift nicht sinken.",
+          "Ohne das Spiel zu beenden \"Schaden je Gift-Tick\" auf 300 und \"Abstand der Gift-Ticks\" auf 5 stellen, wieder vergiften lassen.",
+          "Spiel beenden und hier das Ergebnis wählen."
+        ],
+        "en": [
+          "Under poison damage set \"Damage per poison tick\" to 0.",
+          "Open the game with \"Start game\" and load a savegame.",
+          "Get poisoned and watch the health bar: the poison must not lower it.",
+          "Without quitting set \"Damage per poison tick\" to 300 and \"Interval of the poison ticks\" to 5, get poisoned again.",
+          "Quit the game and pick the result here."
+        ]
+      },
+      "expect": {
+        "de": "Mit 0 kein Verlust durch Gift. Mit 300 und Abstand 5 verliert man deutlich mehr und viel häufiger als im Original. Rechts unter Giftschaden steht \"Zuletzt angewendet: ...\".",
+        "en": "With 0 no loss from poison. With 300 and interval 5 you lose clearly more and much more often than in the original. Under poison damage it says \"Last applied: ...\"."
       }
     },
     {

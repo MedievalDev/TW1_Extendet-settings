@@ -111,6 +111,8 @@ typedef struct {
 	int   lavaEnabled;     /* Lavaschaden */
 	int   lavaPercent;     /* Prozent vom Max-HP je Schadenstick (Original 5) */
 	int   lavaEvery;       /* Schaden alle n Frames (Original 1) */
+	int   poisonPercent;  /* Damage per poison tick, 100 = original */
+	int   poisonInterval; /* Unit updates between ticks, original 31 */
 	int   horseImmortal;   /* Pferd des Helden nimmt keinen Schaden */
 	int   whistleMeters;   /* Pfeifreichweite in Metern, 0 = Exe unveraendert (Original 40) */
 	int   logDamage;       /* Diagnose: jeden HP-Verlust des Helden loggen */
@@ -130,6 +132,7 @@ static void defaults(Settings *s){
 	s->fallDeathHeight = 25.0f; s->fallLethal = 1;
 	s->slideEnabled = 1; s->slidePercent = 10; s->slideGrace = 30;
 	s->lavaEnabled = 1; s->lavaPercent = 5; s->lavaEvery = 1;
+	s->poisonPercent = 100; s->poisonInterval = 31;
 	s->horseImmortal = 0; s->whistleMeters = 0;
 	s->logDamage = 0;
 	s->autoStart = 0; s->autoMinimized = 1;
@@ -193,6 +196,9 @@ static int readIni(Settings *s){
 			if(stricmp(key, "Enabled") == 0)          s->lavaEnabled = iv != 0;
 			else if(stricmp(key, "Percent") == 0)     s->lavaPercent = clampi(iv, 0, 100);
 			else if(stricmp(key, "EveryFrames") == 0) s->lavaEvery = clampi(iv, 1, 600);
+		}else if(stricmp(sect, "PoisonDamage") == 0){
+			if(stricmp(key, "Percent") == 0)          s->poisonPercent = clampi(iv, 0, 1000);
+			else if(stricmp(key, "TickInterval") == 0) s->poisonInterval = clampi(iv, 1, 127);
 		}else if(stricmp(sect, "Horse") == 0){
 			if(stricmp(key, "Immortal") == 0)                s->horseImmortal = iv != 0;
 			else if(stricmp(key, "WhistleRangeMeters") == 0) s->whistleMeters = clampi(iv, 0, 20000);
@@ -228,6 +234,9 @@ static void writeDefaultIni(void){
 		"Enabled=1        ; damage while swimming in lava\n"
 		"Percent=5        ; percent of max HP per damage tick (original 5)\n"
 		"EveryFrames=1    ; a damage tick every n frames (original 1 = every frame)\n"
+		"\n[PoisonDamage]\n"
+		"Percent=100      ; damage per tick, 100 = original; all poisoned units\n"
+		"TickInterval=31  ; unit updates between ticks, 1..127, lower = faster\n"
 		"\n[Horse]\n"
 		"Immortal=0       ; 1 = the hero's horse takes no damage\n"
 		"WhistleRangeMeters=0 ; distance the horse answers the whistle from (original 40), 0 = leave the exe as it is\n"
@@ -498,6 +507,78 @@ static int installLavaHook(void){
 }
 
 /* --------------------------------------------------------- */
+/* Poison: shared unit tick, verified against the 1.7 EXE.   */
+/* --------------------------------------------------------- */
+
+/* 0x4BEC80 adds poison; +0x144 is a signed short countdown.
+ * 0x4BED10 decrements it and deals damage on the following update.
+ * The script callback at 0x57D5A0 computes damage and reduces the poison
+ * pool. Scale only its resulting damage, preserving pool consumption,
+ * attacker attribution and the original virtual damage/kill handling.
+ * Initial countdown = interval-1; reload = (pool > 0 ? interval : 0)-1.
+ * The reload AND uses a sign-extended imm8, hence interval <= 127. */
+#define ADDR_POISON_INITIAL 0x004BECD9
+#define ADDR_POISON_RELOAD  0x004BED74
+#define ADDR_POISON_DAMAGE  0x004BED5B
+static const BYTE poisonInitialOrig[] = {0x66,0xC7,0x86,0x44,0x01,0x00,0x00,0x1E,0x00};
+static const BYTE poisonReloadOrig[] = {0x83,0xE0,0x1F,0x83,0xC0,0xFF,0x66,0x89,0x87,0x44,0x01,0x00,0x00};
+static const BYTE poisonDamageOrig[] = {0x50,0x8B,0xCF,0xFF,0xD2};
+static int g_poisonOk = -1;
+static int g_poisonApplied = 0;
+
+static int __cdecl scalePoisonDamage(int damage){
+	if(damage <= 0 || cfg.poisonPercent == 100) return damage;
+	long long scaled = (long long)damage * cfg.poisonPercent / 100;
+	return scaled > 2147483647LL ? 2147483647 : (int)scaled;
+}
+
+static BYTE *makePoisonThunk(void){
+	BYTE *t = (BYTE *)VirtualAlloc(0, 32, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+	if(!t) return 0;
+	/* Entry: EAX=damage, EDX=original thiscall target, EDI=unit;
+	 * stack=[return, attacker]. Preserve EDX across the C scaler, then
+	 * tail-call the original with stack=[return, scaled damage, attacker]. */
+	BYTE code[] = {0x52,0x50,0xE8,0,0,0,0,0x83,0xC4,0x04,0x5A,
+	               0x59,0x50,0x51,0x8B,0xCF,0xFF,0xE2};
+	*(DWORD *)(code + 3) = (DWORD)(void *)scalePoisonDamage - (DWORD)(t + 7);
+	memcpy(t, code, sizeof code);
+	FlushInstructionCache(GetCurrentProcess(), t, sizeof code);
+	return t;
+}
+
+static int installPoisonHook(void){
+	if(g_poisonOk >= 0) return g_poisonOk;
+	/* Refuse partial/foreign patches before writing any poison bytes. */
+	if(memcmp((void *)ADDR_POISON_INITIAL, poisonInitialOrig, sizeof poisonInitialOrig) != 0
+	   || memcmp((void *)ADDR_POISON_RELOAD, poisonReloadOrig, sizeof poisonReloadOrig) != 0
+	   || memcmp((void *)ADDR_POISON_DAMAGE, poisonDamageOrig, sizeof poisonDamageOrig) != 0){
+		printf("[%s] ERROR: poison code differs - no poison patch\n", PLUG_NAME);
+		return g_poisonOk = 0;
+	}
+	BYTE *t = makePoisonThunk();
+	if(!t) return g_poisonOk = 0;
+	BYTE call[] = {0xE8,0,0,0,0};
+	*(DWORD *)(call + 1) = (DWORD)t - (ADDR_POISON_DAMAGE + 5);
+	if(!writeMem((void *)ADDR_POISON_DAMAGE, call, sizeof call)){
+		VirtualFree(t, 0, MEM_RELEASE);
+		return g_poisonOk = 0;
+	}
+	printf("[%s] Poison hook installed (all units, thunk %p)\n", PLUG_NAME, t);
+	return g_poisonOk = 1;
+}
+
+static void applyPoison(void){
+	g_poisonApplied = 0;
+	if(!installPoisonHook()) return;
+	WORD initial = (WORD)(cfg.poisonInterval - 1);
+	BYTE reload = (BYTE)cfg.poisonInterval;
+	int first = writeMem((void *)(ADDR_POISON_INITIAL + 7), &initial, sizeof initial);
+	int next = writeMem((void *)(ADDR_POISON_RELOAD + 2), &reload, sizeof reload);
+	g_poisonApplied = first && next;
+	if(!g_poisonApplied) printf("[%s] ERROR: could not apply poison interval\n", PLUG_NAME);
+}
+
+/* --------------------------------------------------------- */
 /* Pfeifreichweite: Immediate im Ruf-Tick                    */
 /* --------------------------------------------------------- */
 
@@ -541,6 +622,8 @@ static void writeStatus(void){
 		cfg.slideEnabled, cfg.slidePercent, cfg.slideGrace, cfg.lavaEnabled, cfg.lavaPercent, cfg.lavaEvery,
 		cfg.horseImmortal, cfg.whistleMeters, cfg.logDamage);
 	fprintf(f, "autostart=%d,%d,%d\n", cfg.autoStart, cfg.autoMinimized, g_autoResult);
+	fprintf(f, "poison_hook=%d\npoison_applied=%d\npoison=%d,%d\n",
+		g_poisonOk == 1, g_poisonApplied, cfg.poisonPercent, cfg.poisonInterval);
 	fclose(f);
 }
 
@@ -548,6 +631,7 @@ static void applySettings(const char *why){
 	installLandingHook();
 	applySlide();
 	installLavaHook();
+	applyPoison();
 	applyWhistle();
 	unitsTick();
 	printf("[%s] Einstellungen (%s): Fall %s %d%% min %.1f tot %.1f lethal %d | Rutschen %s %d%% ab %d | Lava %s %d%% alle %d | Pferd unsterblich %d, Pfeife %d m (aktiv %d m) | Log %d\n",
@@ -675,7 +759,7 @@ static void initPlugin(void *RES){
 
 #define REQVER 1
 #define PLUGINVER 1
-#define PLUGINREV 4
+#define PLUGINREV 5
 
 EXPORT int WINAPI InitPlugin(TWSE_INFO* gInfo, _GetFork gf){
 	info = gInfo;
@@ -690,7 +774,7 @@ PLUGIN_INFO THIS_PLUG_INFO = {
 	Version: PLUGINVER,
 	Revision: PLUGINREV,
 	Name: L"TWExtended",
-	Description: L"Adjustable fall, slide and lava damage, immortal horse, whistle range, damage diagnostics, opens the settings tool with the game; settings from tw1_Extendet-settings.ini",
+	Description: L"Adjustable fall, slide, lava and poison damage, poison tick interval, immortal horse, whistle range, damage diagnostics and settings tool autostart; settings from tw1_Extendet-settings.ini",
 	Credits: L"Built on TWSE by buglord",
 	License: LICENSE_CC0,
 0};
