@@ -82,7 +82,7 @@ class IniRoundTrip(unittest.TestCase):
         with open(src, 'w') as f:
             f.write(C_READER)
         exe = os.path.join(self.tmp, 'reader.exe')
-        r = subprocess.run([TCC, '-I' + os.path.join(ROOT, 'twse'), '-I' + ROOT, '-o', exe, src],
+        r = subprocess.run([TCC, '-I' + os.path.join(ROOT, 'twse'), '-I' + ROOT, '-o', exe, src, '-luser32'],
                            capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
         out = subprocess.run([exe], cwd=self.tmp, capture_output=True, text=True).stdout.strip()

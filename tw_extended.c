@@ -606,6 +606,44 @@ static int whistleMetersNow(void){
 }
 
 /* --------------------------------------------------------- */
+/* Heldenfenster: Strg + Klick auf ein Attribut = 10 Punkte   */
+/* --------------------------------------------------------- */
+/* Der Benachrichtigungs-Handler der Attribut-Medaillons (0x5FA7D0) ruft
+ * beim Linksklick 0x5FA030(dlg, index, 1) auf (stdcall, ret 0xC). Die
+ * Routine schickt nur einen Einheitenbefehl; ob noch Punkte da sind,
+ * prueft das Skript (RPGCompute IncreasePoint/CanIncreasePoint). Zehn
+ * Aufrufe sind also sicher, ueberzaehlige lehnt das Skript ab.
+ * Zuruecknehmen (Rechtsklick, 0x5FA807) bleibt bei 1: dort prueft nur
+ * das Fenster die Grenze, das Skript nicht. */
+
+#define ADDR_PARAMCLICK   0x005FA030
+#define PARAM_CALL_INC    0x005FA7F1   /* call 0x5FA030 nach push 1 */
+#define PARAM_CTRL_STEP   10
+
+typedef void (__stdcall *FN_ParamClick)(void *dlg, int idx, int inc);
+static int g_paramOk = -1;   /* -1 ungeprueft, 0 Code passt nicht, 1 Hook gesetzt */
+
+static void __stdcall hookParamClick(void *dlg, int idx, int inc){
+	int i, n = (inc && (GetAsyncKeyState(VK_CONTROL) & 0x8000)) ? PARAM_CTRL_STEP : 1;
+	for(i = 0; i < n; i++) ((FN_ParamClick)ADDR_PARAMCLICK)(dlg, idx, inc);
+}
+
+static void installParamHook(void){
+	BYTE *p = (BYTE *)PARAM_CALL_INC;
+	DWORD rel;
+	if(g_paramOk != -1) return;
+	g_paramOk = 0;
+	if(p[0] != 0xE8 || PARAM_CALL_INC + 5 + *(DWORD *)(p + 1) != ADDR_PARAMCLICK){
+		printf("[%s] FEHLER: Attribut-Klick sieht anders aus - kein Strg+10\n", PLUG_NAME);
+		return;
+	}
+	rel = (DWORD)(void *)hookParamClick - (PARAM_CALL_INC + 5);
+	if(!writeMem(p + 1, &rel, 4)){ printf("[%s] FEHLER: Attribut-Klick nicht beschreibbar\n", PLUG_NAME); return; }
+	g_paramOk = 1;
+	printf("[%s] Heldenfenster: Strg + Klick auf ein Attribut = +%d\n", PLUG_NAME, PARAM_CTRL_STEP);
+}
+
+/* --------------------------------------------------------- */
 /* Anwenden, Status, Konsole                                 */
 /* --------------------------------------------------------- */
 
@@ -622,6 +660,7 @@ static void writeStatus(void){
 		cfg.slideEnabled, cfg.slidePercent, cfg.slideGrace, cfg.lavaEnabled, cfg.lavaPercent, cfg.lavaEvery,
 		cfg.horseImmortal, cfg.whistleMeters, cfg.logDamage);
 	fprintf(f, "autostart=%d,%d,%d\n", cfg.autoStart, cfg.autoMinimized, g_autoResult);
+	fprintf(f, "param_ctrl_hook=%d\n", g_paramOk == 1);
 	fprintf(f, "poison_hook=%d\npoison_applied=%d\npoison=%d,%d\n",
 		g_poisonOk == 1, g_poisonApplied, cfg.poisonPercent, cfg.poisonInterval);
 	fclose(f);
@@ -633,6 +672,7 @@ static void applySettings(const char *why){
 	installLavaHook();
 	applyPoison();
 	applyWhistle();
+	installParamHook();
 	unitsTick();
 	printf("[%s] Einstellungen (%s): Fall %s %d%% min %.1f tot %.1f lethal %d | Rutschen %s %d%% ab %d | Lava %s %d%% alle %d | Pferd unsterblich %d, Pfeife %d m (aktiv %d m) | Log %d\n",
 		PLUG_NAME, why, cfg.fallEnabled ? "an" : "AUS", cfg.fallPercent, cfg.fallMinHeight, cfg.fallDeathHeight, cfg.fallLethal,
@@ -759,7 +799,7 @@ static void initPlugin(void *RES){
 
 #define REQVER 1
 #define PLUGINVER 1
-#define PLUGINREV 5
+#define PLUGINREV 6
 
 EXPORT int WINAPI InitPlugin(TWSE_INFO* gInfo, _GetFork gf){
 	info = gInfo;

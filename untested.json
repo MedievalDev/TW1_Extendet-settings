@@ -264,6 +264,41 @@
         "de": "Das Spiel bleibt beim Start im Vordergrund, das Tool liegt minimiert in der Taskleiste, die Änderung wirkt im Spiel, und nach dem Beenden des Spiels ist auch das Tool zu.",
         "en": "The game stays in front at start, the tool sits minimized in the taskbar, the change takes effect in the game, and after quitting the game the tool is closed too."
       }
+    },
+    {
+      "id": "attribute-ctrl-plus-ten",
+      "since": "1.5.0",
+      "needs_run": true,
+      "title": {
+        "de": "Strg + Klick auf ein Attribut verteilt 10 Punkte",
+        "en": "Ctrl + click on an attribute spends 10 points"
+      },
+      "why": {
+        "de": "Das Plugin ruft den Klick im Heldenfenster bei gedrückter Strg-Taste zehnmal auf. Geprüft ist nur, dass der Hook sitzt; das Verteilen selbst wurde noch nicht im Spiel angeklickt.",
+        "en": "With Ctrl held, the plugin runs the click in the hero window ten times. Only measured that the hook is in place; spending points has not been clicked in the game yet."
+      },
+      "steps": {
+        "de": [
+          "Im Tool rechts \"Aktualisieren (TWSE + Plugin)\" klicken, falls das Plugin als veraltet angezeigt wird.",
+          "Das Spiel über TwoWorldsExtended.exe starten und einen Spielstand mit mindestens 12 freien Parameterpunkten laden (nach ein paar Stufenaufstiegen).",
+          "Das Heldenfenster öffnen (Fertigkeiten-Seite) und die Zahl \"Parameterpunkte\" oben links merken.",
+          "Strg gedrückt halten und einmal links auf das Herz (Lebenskraft) klicken.",
+          "Ohne Strg einmal links auf die Hand (Geschicklichkeit) klicken.",
+          "Einmal rechts auf das Herz klicken."
+        ],
+        "en": [
+          "In the tool click \"Update (TWSE + plugin)\" on the right if the plugin shows as outdated.",
+          "Start the game via TwoWorldsExtended.exe and load a save with at least 12 free attribute points (after a few level-ups).",
+          "Open the hero window (skills page) and note the number of free attribute points at the top left.",
+          "Hold Ctrl and left-click the heart (vitality) once.",
+          "Without Ctrl, left-click the hand (dexterity) once.",
+          "Right-click the heart once."
+        ]
+      },
+      "expect": {
+        "de": "Nach Strg + Klick ist Lebenskraft um 10 höher und es sind 10 Punkte weniger frei; ohne Strg geht Geschicklichkeit um 1 hoch; der Rechtsklick nimmt genau 1 Punkt Lebenskraft zurück. Mit weniger als 10 freien Punkten werden nur die vorhandenen verteilt.",
+        "en": "After Ctrl + click vitality is 10 higher and 10 points fewer are free; without Ctrl dexterity goes up by 1; the right click takes back exactly 1 point of vitality. With fewer than 10 free points only those are spent."
+      }
     }
   ]
 }

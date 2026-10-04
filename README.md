@@ -110,6 +110,10 @@ status.
 | Start minimized | on | the game keeps the focus |
 | Close with the game | on | the tool quits when the game quits |
 
+Always on (no setting): in the hero window, **Ctrl + click on an attribute**
+(vitality, dexterity, strength, willpower) spends 10 points at once instead
+of 1 - or as many as are left. Taking points back (right click) stays at 1.
+
 ## Trainer
 
 The folder `trainer\` holds the TW Trainer, a second TWSE plugin: godmode,
@@ -168,7 +172,7 @@ Files next to the game exe: `tw1_Extendet-settings.ini`, `TWExtended.log`,
 ## Build
 
 - Plugin: `build_extended.bat` (Tiny C Compiler, 32-bit; `..\tcc\tcc.exe` or
-  `set TCC=...`). Offline tests: `tcc -Itwse -o t.exe test_extended.c && t.exe`.
+  `set TCC=...`). Offline tests: `tcc -Itwse -o t.exe test_extended.c -luser32 && t.exe`.
 - Tool tests: `py -3.13 -m unittest discover -s tests -t .`
 - Tool exe: `build_settings_exe.bat` (PyInstaller, Python 3.13). Embeds the
   plugin DLL from `bin\TWSEPlugins\` and `bin\twse.dll` (TWSE by buglord,
@@ -196,6 +200,16 @@ German, with the first-start guide:
 ![Guide](docs/tool_de_guide.png)
 
 ## Changelog
+
+### 1.5.0 (04.10.2026)
+
+- **Ctrl + click on an attribute** in the hero window spends 10 points at
+  once. The plugin redirects the click handler's call 0x5FA7F1 -> 0x5FA030
+  (stdcall: dialog, attribute, increase); with Ctrl held it calls it 10
+  times, the script (`IncreasePoint`) refuses calls beyond the free points.
+  Taking back stays at 1 (only the window checks that limit). Status file:
+  `param_ctrl_hook`. Plugin revision 6.
+- Please help testing: Help > Test untested features.
 
 ### 1.4.0 (04.10.2026)
 
